@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.3
+
+### Fix CodeBuddy international OAuth completion
+
+- Accept both business codes `0` and `200` for CodeBuddy international OAuth
+  state, token and account responses. The previous parser treated `code=200` as
+  a pending login, so users who completed browser authorization remained stuck
+  at “等待浏览器完成授权”. CN and legacy WorkBuddy response handling is unchanged.
+
 ## 0.10.2
 
 ### Fix: panel login never completed

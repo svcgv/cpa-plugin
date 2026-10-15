@@ -78,6 +78,17 @@ func doJSON(client *http.Client, method, fullURL string, headers func(*http.Requ
 }
 
 func doJSONRequest(client *http.Client, req *http.Request) (json.RawMessage, int, error) {
+	return doJSONRequestWithCode200(client, req, false)
+}
+
+// doJSONRequestForProfile applies the business-success codes documented for a
+// provider profile. The CodeBuddy international OAuth API accepts both code=0
+// and code=200; the CN API continues to require code=0.
+func doJSONRequestForProfile(client *http.Client, req *http.Request, profile oauthRequestProfile) (json.RawMessage, int, error) {
+	return doJSONRequestWithCode200(client, req, profile.service == serviceCodeBuddyGlobal)
+}
+
+func doJSONRequestWithCode200(client *http.Client, req *http.Request, allowCode200 bool) (json.RawMessage, int, error) {
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, err
@@ -97,7 +108,7 @@ func doJSONRequest(client *http.Client, req *http.Request) (json.RawMessage, int
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("parse failed: %w", err)
 	}
-	if env.Code != 0 {
+	if env.Code != 0 && !(allowCode200 && env.Code == 200) {
 		return nil, resp.StatusCode, fmt.Errorf("code=%d msg=%s", env.Code, truncateRedacted(env.Msg, 120))
 	}
 	return env.Data, resp.StatusCode, nil

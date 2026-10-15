@@ -178,7 +178,7 @@ func handlePanelLoginStart(req pluginapi.ManagementRequest) map[string]any {
 	if err != nil {
 		return map[string]any{"success": false, "error": "auth state failed: " + err.Error()}
 	}
-	data, _, err := doJSONRequest(client, stateReq)
+	data, _, err := doJSONRequestForProfile(client, stateReq, profile)
 	if err != nil {
 		return map[string]any{"success": false, "error": "auth state failed: " + err.Error()}
 	}
@@ -278,7 +278,7 @@ func handlePanelLoginStatus(req pluginapi.ManagementRequest) map[string]any {
 		panelLogins.Delete(id)
 		return map[string]any{"status": "error", "error": "poll: token request failed"}
 	}
-	tokRaw, status, errTok := doJSONRequest(pollClient, tokenReq)
+	tokRaw, status, errTok := doJSONRequestForProfile(pollClient, tokenReq, session.Profile)
 	if errTok != nil {
 		// Transport failures and 5xx are real errors; 4xx/business codes mean
 		// the user simply has not finished authorizing yet.
@@ -304,7 +304,7 @@ func handlePanelLoginStatus(req pluginapi.ManagementRequest) map[string]any {
 		panelLogins.Delete(id)
 		return map[string]any{"status": "error", "error": "poll: account request failed"}
 	}
-	acctRaw, _, errAcct := doJSONRequest(pollClient, accountReq)
+	acctRaw, _, errAcct := doJSONRequestForProfile(pollClient, accountReq, session.Profile)
 	if errAcct != nil {
 		panelLogins.Delete(id)
 		return map[string]any{
