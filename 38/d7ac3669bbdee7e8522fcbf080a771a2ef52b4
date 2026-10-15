@@ -1,0 +1,21 @@
+qoderwork/panel_login.go
+  s_2d1b1562b785f0::t_b227c011a4508d 119-126
+qoderwork/panel.html
+  s_2d1b1562b785f0::t_b227c011a4508d 893-895,902-918
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "38d7ac3669bbdee7e8522fcbf080a771a2ef52b4",
+  "prompts": {},
+  "sessions": {
+    "s_2d1b1562b785f0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13eec-bae4-74d3-97b9-78c1985c2096",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
