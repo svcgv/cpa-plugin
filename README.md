@@ -6,8 +6,8 @@
 
 | ID | 说明 | 源码 |
 |---|---|---|
-| `workbuddy` | Tencent CodeBuddy OAuth、动态模型、executor、CN 每日签到、Global 专家包、积分面板、可选积分调度 | [workbuddy/](workbuddy/) |
-| `qoderwork` | QoderWork CN（qoder.com.cn）：OAuth 设备授权 + PAT 双登录（可共存）、COSY 签名推理、动态模型、每日签到、积分面板、token 保活 | [qoderwork/](qoderwork/) |
+| `workbuddy` | Tencent CodeBuddy OAuth（面板可选国内版/国际版）、动态模型、executor、按能力的每日签到、Global 专家包、积分面板、可选积分调度 | [workbuddy/](workbuddy/) |
+| `qoderwork` | QoderWork CN（qoder.com.cn）：面板 OAuth 设备授权 + PAT 双登录（可共存）、COSY 签名推理、动态模型、每日签到、积分面板、token 保活 | [qoderwork/](qoderwork/) |
 
 ## 多架构 Release
 
