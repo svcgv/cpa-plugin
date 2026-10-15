@@ -1,0 +1,38 @@
+workbuddy/panel.html
+  s_2d1b1562b785f0::t_f4073496f6e3ee 231-232
+  s_2d1b1562b785f0::t_9e4395c0c2b95b 1127-1128,1135,1138-1140,1142
+registry.json
+  s_2d1b1562b785f0::t_93d47a06669deb 9
+workbuddy/main.go
+  s_2d1b1562b785f0::t_93d47a06669deb 343
+workbuddy/panel.test.js
+  s_2d1b1562b785f0::t_e2f9b46c6c2be5 548,555
+workbuddy/panel_login.go
+  s_2d1b1562b785f0::t_b773fcada48502 109-115,120-122,125,130-131
+workbuddy/panel_login_test.go
+  s_2d1b1562b785f0::t_6df3a89bd9a1a4 122-126,135-137,187-188,331,357
+workbuddy/CHANGELOG.md
+  s_2d1b1562b785f0::t_02f803e316f1b4 3-18
+workbuddy/README.md
+  s_2d1b1562b785f0::t_8928fda4aa8947 15-21,42-43,92-94
+workbuddy/README_CN.md
+  s_2d1b1562b785f0::t_cbe1e27a171ca9 13-15,31-32,77-78
+workbuddy/VERSION
+  s_2d1b1562b785f0::t_342334df4f771c 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1edb248ff9709fc0d84d167289ffeac08af86af5",
+  "prompts": {},
+  "sessions": {
+    "s_2d1b1562b785f0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13eec-bae4-74d3-97b9-78c1985c2096",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
