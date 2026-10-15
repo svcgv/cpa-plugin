@@ -26,6 +26,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -235,6 +236,30 @@ func (d *deviceTokenResponse) accessToken() string {
 	return d.DeviceToken
 }
 
+// defaultMachineID returns the stable machine id this host presents to Qoder.
+// The official clients persist one machine id per install and bind the device
+// authorization to it; deriving it from host+user here keeps OAuth logins on
+// the same host from rotating the device identity on every restart. Set
+// QODERWORK_MACHINE_ID to override it explicitly.
+func defaultMachineID() string {
+	if v := strings.TrimSpace(os.Getenv("QODERWORK_MACHINE_ID")); v != "" {
+		return v
+	}
+	host, _ := os.Hostname()
+	user := strings.TrimSpace(os.Getenv("USER"))
+	if user == "" {
+		user = strings.TrimSpace(os.Getenv("USERNAME"))
+	}
+	if official := readOfficialMachineIdentity(); official.MachineID != "" {
+		return official.MachineID
+	}
+	seed := strings.TrimSpace(host) + "|" + user
+	if seed == "|" {
+		return uuid.NewString()
+	}
+	return uuid.NewSHA1(uuid.NameSpaceDNS, []byte("qoderwork-machine:"+seed)).String()
+}
+
 // makePKCE returns (verifier, challenge) per RFC 7636 (S256).
 func makePKCE() (string, string) {
 	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
@@ -259,7 +284,7 @@ func makePKCE() (string, string) {
 func handleStartLogin(raw []byte) ([]byte, error) {
 	verifier, challenge := makePKCE()
 	nonce := uuid.NewString()
-	machineID := uuid.NewString()
+	machineID := defaultMachineID()
 
 	q := url.Values{}
 	q.Set("challenge", challenge)
@@ -272,7 +297,7 @@ func handleStartLogin(raw []byte) ([]byte, error) {
 
 	now := time.Now()
 	state := fmt.Sprintf("qw-%d", now.UnixNano())
-	loginStates.Store(state, &loginCtx{verifier: verifier, nonce: nonce, expires: now.Add(loginTTL), startedAt: now.UnixNano()})
+	loginStates.Store(state, &loginCtx{verifier: verifier, nonce: nonce, machineID: machineID, expires: now.Add(loginTTL), startedAt: now.UnixNano()})
 	return okEnvelope(pluginapi.AuthLoginStartResponse{
 		Provider:  providerName,
 		URL:       authURL,
@@ -404,6 +429,7 @@ func handlePollLogin(raw []byte) ([]byte, error) {
 		// UserID is already in the poll response; nickname is fetched lazily
 		// by the panel on first load. PAT coalescing happens on keepalive.
 		sa := buildStoredAuthFromDeviceToken(tok, nil)
+		sa.Auth.MachineID = lc.machineID
 		loginStates.Delete(state)
 		return okEnvelope(pluginapi.AuthLoginPollResponse{
 			Status: pluginapi.AuthLoginStatusSuccess,

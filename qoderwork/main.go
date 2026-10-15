@@ -96,8 +96,7 @@ const (
 	endpointProUpgrade    = upstreamBaseCN + "/sash/api/v1/me/pro-upgrade/claim"
 
 	// Inference endpoints (COSY-signed + QoderEncoding body).
-	endpointChat   = gatewayBaseCN + "/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
-	endpointModels = gatewayBaseCN + "/algo/api/v2/model/list?Encode=1"
+	endpointChat = gatewayBaseCN + "/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
 
 	// loginTTL bounds one device-authorization flow. Users may need to log in
 	// to qoder.com.cn first (Aliyun SSO) before authorizing — give them room.
@@ -111,6 +110,7 @@ const (
 type loginCtx struct {
 	verifier  string // PKCE code_verifier — required by the poll endpoint
 	nonce     string // device-flow nonce — paired with the auth URL
+	machineID string // machine_id sent in the auth URL; persisted for COSY headers
 	expires   time.Time
 	startedAt int64 // unix nano, set when StartLogin creates the state
 }
@@ -370,6 +370,13 @@ func wbRegistration() registration {
 	}
 }
 
+// endpointModels is the QoderWork CN model-catalog endpoint. It is a var so
+// unit tests can point the fetch at an httptest server. The catalog fetch signs
+// an empty body and sends no query string: current gateway builds reject the
+// legacy ?Encode=1 + "{}"-signed form with a signature error, which silently
+// dropped the dynamic list back to the static fallback.
+var endpointModels = gatewayBaseCN + "/algo/api/v2/model/list"
+
 // dynamicModelsCacheTTL bounds how long a fetched model list is reused.
 // model.static / model.for_auth are re-invoked by CPA on every config reload
 // and on each models query; without caching, every reload fans out to one
@@ -462,11 +469,12 @@ type storedAuth struct {
 // personalToken (pt-) is family-independent and never overwritten by refreshes
 // — it re-exchanges a fresh jobToken pair when both live tokens die.
 type storedTokens struct {
-	AccessToken   string `json:"accessToken"`   // jt- (24h) or dt- (~30d)
-	RefreshToken  string `json:"refreshToken"`  // jrt- (48h) or drt- (~1y)
-	PersonalToken string `json:"personalToken"` // pt-..., long-lived fallback
-	ExpiresAt     int64  `json:"expiresAt"`     // active-token expiry (unix seconds)
-	Domain        string `json:"domain"`        // realm: qoder.com.cn
+	AccessToken   string `json:"accessToken"`         // jt- (24h) or dt- (~30d)
+	RefreshToken  string `json:"refreshToken"`        // jrt- (48h) or drt- (~1y)
+	PersonalToken string `json:"personalToken"`       // pt-..., long-lived fallback
+	ExpiresAt     int64  `json:"expiresAt"`           // active-token expiry (unix seconds)
+	Domain        string `json:"domain"`              // realm: qoder.com.cn
+	MachineID     string `json:"machineId,omitempty"` // device-auth machine id used for COSY headers
 }
 
 type storedAccount struct {
@@ -509,6 +517,7 @@ func parseStored(raw []byte) (*storedAuth, error) {
 			PersonalToken string `json:"personalToken"` // PAT fallback — must survive the flat shape too
 			ExpiresAt     int64  `json:"expiresAt"`
 			Domain        string `json:"domain"`
+			MachineID     string `json:"machineId"`
 			UID           string `json:"uid"`
 			EnterpriseID  string `json:"enterpriseId"`
 			Nickname      string `json:"nickname"`
@@ -516,7 +525,7 @@ func parseStored(raw []byte) (*storedAuth, error) {
 		if err := json.Unmarshal(raw, &flat); err != nil {
 			return nil, fmt.Errorf("storage_parse_error: %w", err)
 		}
-		sa.Auth = storedTokens{AccessToken: flat.AccessToken, RefreshToken: flat.RefreshToken, PersonalToken: flat.PersonalToken, ExpiresAt: flat.ExpiresAt, Domain: flat.Domain}
+		sa.Auth = storedTokens{AccessToken: flat.AccessToken, RefreshToken: flat.RefreshToken, PersonalToken: flat.PersonalToken, ExpiresAt: flat.ExpiresAt, Domain: flat.Domain, MachineID: flat.MachineID}
 		sa.Account = storedAccount{UID: flat.UID, EnterpriseID: flat.EnterpriseID, Nickname: flat.Nickname}
 	}
 	if sa.Auth.AccessToken == "" {

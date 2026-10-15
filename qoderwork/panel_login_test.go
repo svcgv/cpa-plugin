@@ -134,6 +134,12 @@ func TestQoderPanelLoginHappyPath(t *testing.T) {
 	if sa.Auth.Domain != "qoder.com.cn" {
 		t.Errorf("stored domain = %q", sa.Auth.Domain)
 	}
+	if sa.Auth.MachineID == "" {
+		t.Errorf("stored machineId is empty: %#v", sa.Auth)
+	}
+	if !strings.Contains(url, "machine_id="+sa.Auth.MachineID) {
+		t.Errorf("auth URL machine_id does not match persisted machineId: url=%q machineId=%q", url, sa.Auth.MachineID)
+	}
 	// The panel must never receive token material.
 	for _, key := range []string{"access_token", "refresh_token", "token", "verifier", "nonce"} {
 		if _, present := status[key]; present {

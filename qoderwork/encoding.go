@@ -8,6 +8,7 @@ package main
 
 import (
 	"encoding/base64"
+	"fmt"
 	"strings"
 )
 
@@ -49,4 +50,30 @@ func qoderEncode(plain []byte) string {
 		sb.WriteByte(qoderS2C[c])
 	}
 	return sb.String()
+}
+
+// qoderDecode reverses qoderEncode. It is used when a gateway build answers
+// with Encode=1 and returns the custom base64 alphabet instead of plain JSON.
+func qoderDecode(encoded []byte) ([]byte, error) {
+	n := len(encoded)
+	if n == 0 {
+		return nil, fmt.Errorf("empty qoder payload")
+	}
+	std := make([]byte, n)
+	for i, c := range encoded {
+		if c >= 128 || qoderC2S[c] == 0 {
+			return nil, fmt.Errorf("invalid qoder payload byte 0x%02x at %d", c, i)
+		}
+		std[i] = qoderC2S[c]
+	}
+	a := n / 3
+	out := make([]byte, n)
+	// Encode rearranges std as std[n-a:] + std[a:n-a] + std[:a]; reverse it:
+	//   segment 1 (last a bytes of std) is out[n-a:]
+	//   segment 2 (middle)              is out[a:n-a]
+	//   segment 3 (first a bytes)       is out[:a]
+	copy(out[:a], std[n-a:])
+	copy(out[a:n-a], std[a:n-a])
+	copy(out[n-a:], std[:a])
+	return base64.StdEncoding.DecodeString(string(out))
 }

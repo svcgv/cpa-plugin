@@ -31,6 +31,7 @@ type panelLoginSession struct {
 	ID        string
 	Nonce     string
 	Verifier  string
+	MachineID string
 	AuthURL   string
 	ExpiresAt time.Time
 	StartedAt int64
@@ -91,7 +92,7 @@ func nextPanelLoginID() string {
 func handlePanelLoginStart(req pluginapi.ManagementRequest) map[string]any {
 	verifier, challenge := makePKCE()
 	nonce := uuid.NewString()
-	machineID := uuid.NewString()
+	machineID := defaultMachineID()
 
 	q := url.Values{}
 	q.Set("challenge", challenge)
@@ -107,6 +108,7 @@ func handlePanelLoginStart(req pluginapi.ManagementRequest) map[string]any {
 		ID:        nextPanelLoginID(),
 		Nonce:     nonce,
 		Verifier:  verifier,
+		MachineID: machineID,
 		AuthURL:   authURL,
 		ExpiresAt: now.Add(loginTTL),
 		StartedAt: now.UnixNano(),
@@ -183,6 +185,7 @@ func handlePanelLoginStatus(req pluginapi.ManagementRequest) map[string]any {
 		pat = existingPATForUIDVia(uid, qoderHostAuthList, qoderHostAuthGet)
 	}
 	sa := buildStoredAuthFromDeviceTokenWithPAT(tok, nil, pat)
+	sa.Auth.MachineID = session.MachineID
 	if err := panelAuthPersist(sa); err != nil {
 		// Keep the session so the user can retry the save without authorizing
 		// again in the browser.

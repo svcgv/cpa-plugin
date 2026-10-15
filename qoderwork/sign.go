@@ -18,6 +18,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"net/url"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -115,9 +116,19 @@ func aesCBCEncrypt(plain, tempKey []byte) ([]byte, error) {
 	return out, nil
 }
 
-// newCosySession builds a fresh session for the given identity.
+// newCosySession builds a fresh session for the given identity, generating a
+// random machine id. Callers that already have a persisted machine id (device
+// authorization) must use newCosySessionWithMachineID so the COSY identity
+// matches the machine_id the grant was authorized for.
 func newCosySession(id cosyIdentity) (*cosySession, error) {
-	machineID := uuid.NewString()
+	return newCosySessionWithMachineID(id, uuid.NewString())
+}
+
+// newCosySessionWithMachineID builds a session bound to an explicit machine id.
+func newCosySessionWithMachineID(id cosyIdentity, machineID string) (*cosySession, error) {
+	if strings.TrimSpace(machineID) == "" {
+		machineID = uuid.NewString()
+	}
 	seed := []byte(uuid.NewString() + uuid.NewString())
 	if len(seed) > 50 {
 		seed = seed[:50]
@@ -160,17 +171,28 @@ func newCosySession(id cosyIdentity) (*cosySession, error) {
 	}, nil
 }
 
-// buildBearer constructs the Authorization header for one request.
-// pathSig is url.Path with the "/algo" prefix stripped; body is the raw
-// (already QoderEncoding-encoded) request body string.
-func (s *cosySession) buildBearer(body, rawURL string) (payloadB64, date, bearer string, err error) {
+// cosySigPath returns the request path the COSY signature covers: url.Path
+// with the "/algo" prefix stripped. The gateway signs the path only, never the
+// query string.
+func cosySigPath(rawURL string) (string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return "", "", "", err
+		return "", err
 	}
 	pathSig := u.Path
 	if strings.HasPrefix(pathSig, "/algo") {
 		pathSig = pathSig[len("/algo"):]
+	}
+	return pathSig, nil
+}
+
+// buildBearer constructs the Authorization header for one request.
+// body is the exact string the caller puts on the wire (the QoderEncoding
+// payload for POSTs, empty for bodyless GETs).
+func (s *cosySession) buildBearer(body, rawURL string) (payloadB64, date, bearer string, err error) {
+	pathSig, err := cosySigPath(rawURL)
+	if err != nil {
+		return "", "", "", err
 	}
 	payload := map[string]string{
 		"cosyVersion": "0.1.43",
@@ -187,8 +209,27 @@ func (s *cosySession) buildBearer(body, rawURL string) (payloadB64, date, bearer
 	return payloadB64, date, bearer, nil
 }
 
-// headers returns the full header set for one inference request.
-// extra headers (x-model-key, x-model-source) are merged in by the caller.
+// buildMachineOS returns the Cosy-Machineos value in the arch_os form the Qoder
+// clients send (for example aarch64_darwin).
+func buildMachineOS() string {
+	arch := runtime.GOARCH
+	switch arch {
+	case "amd64":
+		arch = "x86_64"
+	case "arm64":
+		arch = "aarch64"
+	}
+	osName := runtime.GOOS
+	return arch + "_" + osName
+}
+
+// headers returns the header set for one inference request. body must be the
+// exact string sent on the wire. extra headers (x-model-key, x-model-source)
+// are merged in by the caller.
+//
+// The inference path is intentionally left without Cosy-Bodyhash/Cosy-Bodylength/
+// Cosy-Sigpath: chat already works against the live gateway and the catalog path
+// is the one that needs the extra identity fields (see modelListHeaders).
 func (s *cosySession) headers(uid, body, rawURL, accept string, sse bool) (map[string]string, error) {
 	_, date, bearer, err := s.buildBearer(body, rawURL)
 	if err != nil {
@@ -214,6 +255,53 @@ func (s *cosySession) headers(uid, body, rawURL, accept string, sse bool) (map[s
 	}
 	if sse {
 		h["cache-control"] = "no-cache"
+	}
+	return h, nil
+}
+
+// modelListHeaders is the header set for GET /algo/api/v2/model/list. The
+// catalog is a bodyless GET, so the COSY signature covers an empty body. It
+// also uses the machine identity values the official clients send for catalog
+// discovery: Machinetype "5", MachineToken = Machineid, and Machineos in
+// arch_os form. Using the inference profile (random machinetype/token) here is
+// accepted by some accounts but rejected by others once the gateway refreshes
+// its client-identity checks.
+func (s *cosySession) modelListHeaders(uid, rawURL string) (map[string]string, error) {
+	// The catalog is a bodyless GET: the signature, Cosy-Bodyhash (MD5 of "") and
+	// Cosy-Bodylength must all describe an empty body, or the gateway answers
+	// {"code":"101","message":"Signature invalid"}.
+	h, err := s.headers(uid, "", rawURL, "application/json", false)
+	if err != nil {
+		return nil, err
+	}
+	sigPath, err := cosySigPath(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	emptySum := md5.Sum(nil)
+	h["cosy-clientip"] = "127.0.0.1"
+	h["cosy-machinetype"] = "5"
+	h["cosy-machinetoken"] = s.MachineID
+	h["cosy-machineos"] = buildMachineOS()
+	h["cosy-bodyhash"] = hex.EncodeToString(emptySum[:])
+	h["cosy-bodylength"] = "0"
+	h["cosy-sigpath"] = sigPath
+	// Prefer the official client's cached identity when it exists: the gateway
+	// recognises a real installation, and the official Cosy-Version keeps the
+	// catalog request on the same client profile the CLI uses.
+	if official := readOfficialMachineIdentity(); !official.empty() {
+		if official.MachineType != "" {
+			h["cosy-machinetype"] = official.MachineType
+		}
+		if official.MachineToken != "" {
+			h["cosy-machinetoken"] = official.MachineToken
+		}
+		if official.MachineOS != "" {
+			h["cosy-machineos"] = official.MachineOS
+		}
+		if official.CosyVersion != "" {
+			h["cosy-version"] = official.CosyVersion
+		}
 	}
 	return h, nil
 }

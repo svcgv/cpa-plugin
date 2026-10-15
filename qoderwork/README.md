@@ -10,7 +10,7 @@
 | **面板 OAuth 登录** | 面板「OAuth 登录」弹窗直接发起设备授权：显示授权链接、可复制/打开、可取消、可重试；登录成功后自动刷新该账号额度与签到状态。仅国内版 qoder.com.cn，不提供国际版选项 |
 | **Pro 领取** | 面板手动「领取 Pro」：先查 eligibility，可领才 claim 一次性 Pro 升级包（+1800），不自动领取 |
 | **COSY 推理** | RSA 包 AES 会话密钥 + MD5 请求签名，对接 gateway.qoder.com.cn SSE 流式 |
-| **动态模型** | COSY 拉取 `/algo/api/v2/model/list`（chat scene），10 静态模型兜底 |
+| **动态模型** | COSY 拉取 `/algo/api/v2/model/list`（bodyless GET，空 body 签名；兼容旧 `?Encode=1`/编码 body 形式），chat + inline scene，10 静态模型兜底；失败原因可在 `/plugins/qoderwork/models/status` 查看 |
 | **每日签到** | 面板手动签到（单账号/批量）+ 09:00/21:00 定时自动签到，签到后返回最新积分快照 |
 | **积分面板** | 账号卡片：昵称/积分/计划/签到状态/操作（签到/刷新/选用） |
 | **token 保活** | 22:00 定时刷新；按 token 前缀路由（drt- → deviceToken/refresh，jrt- → jobToken/refresh），PAT 永不劫持 OAuth 刷新 |
@@ -97,6 +97,22 @@ auth 文件字段（可共存）：
 ## 模型
 
 10 个静态模型（`qmodel_preview` 等）+ COSY 动态拉取。CPA 侧别名示例：`qoder/qwen3.8-max` → `qmodel_preview`。
+
+动态拉取细节（对齐官方客户端 / cockpit-tools）：
+
+- 请求 `GET https://gateway.qoder.com.cn/algo/api/v2/model/list`，**无查询串**、**无请求体**，
+  COSY 签名覆盖空 body（`Cosy-Bodyhash`/`Cosy-Bodylength` 随之置空值）。
+  旧实现签的是 `qoderEncode("{}")` 的 body 但发送时又不带 body，签名与线上 body 不一致，
+  网关直接返回 `403 {"code":"101","message":"Signature invalid"}`，于是模型列表静默退回静态兜底 —— 这正是「登录后拉取模型异常」的根因。
+- 兼容兜底：依次尝试 `?Encode=1`（空 body 签名）、`?Encode=1` + 编码 body、`POST` + 编码 body，
+  并把响应按「明文 JSON / QoderEncoding / `{code,data}` 信封」三种形态解析。
+- 客户端身份：`Cosy-Machinetype=5`、`Cosy-Machinetoken=Cosy-Machineid`、`Cosy-Machineos=<arch>_<os>`；
+  若本机存在官方客户端的 `SharedClientCache/cache/machine_token.json` 与 `cache/id`，优先使用其中的
+  机器身份与 `Cosy-Version`（cockpit-tools 同款做法）。OAuth 设备授权会持久化 `machineId`，
+  让授权时用的机器标识与后续 COSY 请求保持一致。
+- 诊断接口：`GET /plugins/qoderwork/models/status` 返回上次拉取来源（dynamic/static）、数量、
+  以及每个账号的失败原因；`POST /plugins/qoderwork/models/refresh` 清缓存并立即重拉。
+- 失败退避 2 分钟，避免上游故障时每次 `model.static`/`model.for_auth` 都打满请求。
 
 ## 参考文档
 

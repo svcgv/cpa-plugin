@@ -22,9 +22,9 @@
     {
       "id": "qoderwork",
       "name": "QoderWork",
-      "description": "QoderWork CN (qoder.com.cn) provider for CLIProxyAPI: panel OAuth device authorization (copyable/retryable/cancellable, CN only) plus PAT import (coexisting), COSY-signed chat executor, dynamic model list, daily check-in with credit snapshot, token keepalive (deviceToken/jobToken prefix-routed, PAT fallback), accounts panel.",
+      "description": "QoderWork CN (qoder.com.cn) provider for CLIProxyAPI: panel OAuth device authorization (copyable/retryable/cancellable, CN only) plus PAT import (coexisting), COSY-signed chat executor, dynamic model list (bodyless-GET COSY catalog with official-client machine identity), daily check-in with credit snapshot, token keepalive (deviceToken/jobToken prefix-routed, PAT fallback), accounts panel, model-catalog diagnostics.",
       "author": "Sliverkiss",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "repository": "https://github.com/Sliverkiss/cpa-plugin",
       "logo": "https://raw.githubusercontent.com/DGZSbot/ai-icon/refs/heads/main/QoderWork.png",
       "homepage": "https://github.com/Sliverkiss/cpa-plugin/tree/main/qoderwork",

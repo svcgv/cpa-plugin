@@ -5,7 +5,10 @@
 package main
 
 import (
+	"strings"
 	"sync"
+
+	"github.com/google/uuid"
 )
 
 // cosySessionCache maps authUID → *cosySession. Lazy-built on first inference
@@ -48,7 +51,14 @@ func cosySessionFor(sa *storedAuth) (*cosySession, error) {
 		SecurityOauthToken: sa.Auth.AccessToken,
 		RefreshToken:       sa.Auth.RefreshToken,
 	}
-	sess, err := newCosySession(id)
+	machineID := strings.TrimSpace(sa.Auth.MachineID)
+	if machineID == "" {
+		// Legacy credentials (PAT imports and OAuth files written before
+		// machineId persistence) still need a stable machine identity: derive
+		// one from the account uid so restarts do not rotate it.
+		machineID = stableMachineID(sa)
+	}
+	sess, err := newCosySessionWithMachineID(id, machineID)
 	if err != nil {
 		return nil, err
 	}
@@ -71,3 +81,17 @@ type cosyError string
 func (e cosyError) Error() string { return string(e) }
 
 const errEmptyToken = cosyError("cosy: empty access token")
+
+// stableMachineID derives a persistent machine id for credentials that predate
+// machineId persistence. Device-authorized accounts store the id explicitly;
+// this fallback keeps PAT imports and legacy files stable across restarts.
+func stableMachineID(sa *storedAuth) string {
+	key := strings.TrimSpace(sa.Account.UID)
+	if key == "" {
+		key = strings.TrimSpace(sa.Auth.PersonalToken)
+	}
+	if key == "" {
+		key = strings.TrimSpace(sa.Auth.AccessToken)
+	}
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("qoderwork-machine:"+key)).String()
+}
