@@ -545,14 +545,14 @@ test("starting an add-account login posts the selected region", async () => {
     },
   });
   context.openAddModal();
-  const radio = { value: "global", checked: true };
+  const radio = { value: "workbuddy-global", checked: true };
   context.document.querySelector = (sel) => (sel.indexOf("addRegion") >= 0 ? radio : null);
 
   await context.startAddLogin(elements.get("addStartBtn") || { disabled: false, dataset: {}, classList: { add() {}, remove() {} } });
 
   const start = calls.find(c => String(c.url).indexOf("/login/start") >= 0);
   assert.ok(start, "expected a /login/start call");
-  assert.equal(JSON.parse(start.body).region, "global");
+  assert.equal(JSON.parse(start.body).region, "workbuddy-global");
   // The authorization URL is shown so the user can copy it if the popup is blocked.
   assert.ok((elements.get("addBody").innerHTML || "").indexOf("https://example.test/login") >= 0);
 });

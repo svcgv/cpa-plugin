@@ -119,6 +119,11 @@ func withCapturedPersist(t *testing.T) *authCollector {
 	return c
 }
 
+// The selector values must map to the services this plugin has always used:
+// 国际版 is the WorkBuddy international service (workbuddy.ai) — what
+// isGlobalDomain classifies as global and what existing Global credentials
+// carry — while CodeBuddy international (codebuddy.ai) is a separate,
+// explicitly labeled option.
 func TestPanelLoginStartSelectsServiceByRegion(t *testing.T) {
 	cases := []struct {
 		region      string
@@ -127,7 +132,9 @@ func TestPanelLoginStartSelectsServiceByRegion(t *testing.T) {
 	}{
 		{"", "copilot.tencent.com", serviceCN},
 		{"cn", "copilot.tencent.com", serviceCN},
-		{"global", "www.codebuddy.ai", serviceCodeBuddyGlobal},
+		{"workbuddy-global", "www.workbuddy.ai", serviceWorkBuddyGlobal},
+		{"global", "www.workbuddy.ai", serviceWorkBuddyGlobal},
+		{"codebuddy-global", "www.codebuddy.ai", serviceCodeBuddyGlobal},
 	}
 	for _, tc := range cases {
 		t.Run(tc.region, func(t *testing.T) {
@@ -177,7 +184,8 @@ func TestPanelLoginPersistsPerServiceCredential(t *testing.T) {
 		wantFilePref string
 	}{
 		{"cn", "www.codebuddy.cn", "workbuddy-uid-1.json"},
-		{"global", "www.codebuddy.ai", "workbuddy-codebuddy-global-uid-1.json"},
+		{"workbuddy-global", "www.workbuddy.ai", "workbuddy-uid-1.json"},
+		{"codebuddy-global", "www.codebuddy.ai", "workbuddy-codebuddy-global-uid-1.json"},
 	} {
 		t.Run(tc.region, func(t *testing.T) {
 			f := &loginFakeUpstream{tokenReady: true}
@@ -320,7 +328,7 @@ func TestPanelLoginConcurrentRegionsStayIsolated(t *testing.T) {
 	saved := withCapturedPersist(t)
 
 	cnStart := handlePanelLoginStart(mgmtReq(t, map[string]any{"region": "cn"}))
-	glStart := handlePanelLoginStart(mgmtReq(t, map[string]any{"region": "global"}))
+	glStart := handlePanelLoginStart(mgmtReq(t, map[string]any{"region": "workbuddy-global"}))
 	cnID := cnStart["session_id"].(string)
 	glID := glStart["session_id"].(string)
 	if cnID == glID {
@@ -346,7 +354,7 @@ func TestPanelLoginConcurrentRegionsStayIsolated(t *testing.T) {
 	for _, c := range saved.snapshot() {
 		domains[c.sa.Auth.Domain]++
 	}
-	if domains["www.codebuddy.cn"] != 1 || domains["www.codebuddy.ai"] != 1 {
+	if domains["www.codebuddy.cn"] != 1 || domains["www.workbuddy.ai"] != 1 {
 		t.Fatalf("persisted domains = %v", domains)
 	}
 }

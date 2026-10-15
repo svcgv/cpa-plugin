@@ -12,11 +12,13 @@ built-in management dashboard.
 
 - **OAuth login** — multi-account `workbuddy-<uid>.json` auth files via the
   host's auth store. CN and Global realms share one plugin, one config block.
-- **Two-region add-account** — the panel dialog offers 国内版 (CodeBuddy CN) and
-  国际版 (CodeBuddy international, `www.codebuddy.ai`), and both can be used at
-  once. An account's region comes from its credential domain (`cn`,
-  `codebuddy-global`, `workbuddy-global`); routing, refresh and model catalogs are
-  isolated per region with no cross-region fallback.
+- **Multi-region add-account** — the panel dialog offers 国内版 (CodeBuddy CN),
+  国际版 (WorkBuddy international, `workbuddy.ai` — the service this plugin has
+  always called 国际版) and CodeBuddy 国际版 (CodeBuddy international,
+  `codebuddy.ai`). All can be used at once. An account's region comes from its
+  credential domain (`cn`, `workbuddy-global`, `codebuddy-global`); routing,
+  refresh and model catalogs are isolated per region with no cross-region
+  fallback.
 - **Model catalog**: by default the plugin discovers and caches each
   authenticated account's model entitlements. An optional authoritative YAML
   list can replace WorkBuddy discovery. Both modes enrich missing metadata from
@@ -37,8 +39,8 @@ built-in management dashboard.
   automatically at 09:00 and 21:00 local time (configurable); others show
   "unsupported", and an inconclusive probe still allows a manual attempt.
   Per-account mutexes prevent duplicate claims from racing browser tabs.
-- **Trial claim** — legacy WorkBuddy-international accounts can claim the
-  one-time 250-credit expert trial pack from the panel. CodeBuddy international
+- **Trial claim** — 国际版 accounts (`workbuddy.ai`) can claim the one-time
+  250-credit expert trial pack from the panel. CodeBuddy 国际版 (`codebuddy.ai`)
   does not offer this button.
 - **Dashboard** — embedded panel at `/v0/resource/plugins/workbuddy/panel`
   with credits progress bars, plan badges, exhausted/disabled flags, region
@@ -87,7 +89,9 @@ Open the WorkBuddy panel from CPA's sidebar (or hit
 a region and finish the authorization:
 
 - **国内版 (codebuddy.cn)** signs in through the CodeBuddy CN gateway.
-- **国际版 (codebuddy.ai)** signs in to CodeBuddy international.
+- **国际版 (workbuddy.ai)** signs in to the WorkBuddy international service.
+- **CodeBuddy 国际版 (codebuddy.ai)** signs in to CodeBuddy international. These
+  are two distinct services; the second is not what this plugin calls 国际版.
 
 The panel only receives a session id and the authorization URL; tokens are
 exchanged and persisted backend-side and never rendered in the page. Closing or

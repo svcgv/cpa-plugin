@@ -106,24 +106,29 @@ func domainForService(s wbService) string {
 	}
 }
 
-// serviceFromRegion maps the panel's region selector onto a service. The
-// international option targets CodeBuddy international (www.codebuddy.ai); the
-// legacy WorkBuddy international service is reachable only by imported or
-// already-stored credentials.
+// serviceFromRegion maps the panel's region selector onto a service.
+//
+// "国际版" means the WorkBuddy international service (www.workbuddy.ai): that is
+// what this plugin has always called 国际版, what isGlobalDomain classifies as
+// global, and what existing Global credentials carry as their domain. CodeBuddy
+// international (www.codebuddy.ai) is a separate service and gets its own
+// explicit selector value so the two are never conflated.
 func serviceFromRegion(region string) (wbService, error) {
 	switch region {
 	case "", "cn":
 		return serviceCN, nil
-	case "global", "codebuddy-global", "codebuddy.ai":
+	case "workbuddy-global", "global":
+		return serviceWorkBuddyGlobal, nil
+	case "codebuddy-global", "codebuddy.ai":
 		return serviceCodeBuddyGlobal, nil
 	default:
-		return "", fmt.Errorf("unsupported region %q (want cn or global)", region)
+		return "", fmt.Errorf("unsupported region %q (want cn, workbuddy-global or codebuddy-global)", region)
 	}
 }
 
 // profileForServiceLogin resolves the request profile for a service login.
-// CN keeps honouring the configured oauth_client_mode; international services
-// each have a single client profile.
+// CN keeps honouring the configured oauth_client_mode; each international
+// service has a single client profile of its own.
 func profileForServiceLogin(service wbService) oauthRequestProfile {
 	if service == serviceCN {
 		mode := oauthClientModeCLI

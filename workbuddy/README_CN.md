@@ -10,8 +10,9 @@
 
 - **OAuth 登录** — 通过宿主 auth store 管理多账号 `workbuddy-<uid>.json`，
   CN 和 Global 共用一个插件、一份配置。
-- **双区域添加账号** — 面板「添加账号」可选国内版或国际版：国内版走现有
-  CodeBuddy CN 网关，国际版登录 CodeBuddy 国际（`www.codebuddy.ai`）。两区可同时使用。
+- **多区域添加账号** — 面板「添加账号」可选国内版、国际版（`workbuddy.ai`）
+  或 CodeBuddy 国际版（`codebuddy.ai`）。国内版走现有 CodeBuddy CN 网关；国际版
+  即本插件一直使用的 WorkBuddy 国际服务。多区可同时使用。
   区域由凭证 domain 决定（`cn` / `codebuddy-global` / `workbuddy-global`），
   路由、刷新与模型目录按区域隔离，不会跨区回退。
 - **模型目录**：默认按已认证账号发现并缓存可用模型，也可以用 YAML 中的完整
@@ -27,8 +28,8 @@
   `supported` / `unsupported` / `unknown`。仅有活动的账号显示「签到」并在
   09:00 / 21:00 自动签到；没有活动显示「不支持签到」；查询失败显示「状态未知」
   但仍可手动尝试。CN 与外服账号都适用。
-- **Trial 领取** — 旧 WorkBuddy 国际版账号可在面板领取一次性 250 积分专家加油包。
-  CodeBuddy 国际版不显示该按钮。
+- **Trial 领取** — 国际版（`workbuddy.ai`）账号可在面板领取一次性 250 积分专家加油包。
+  CodeBuddy 国际版（`codebuddy.ai`）不显示该按钮。
 - **积分面板** — 内嵌面板 `/v0/resource/plugins/workbuddy/panel`，含积分
   进度条、套餐徽章、耗尽/禁用标记、CN/Global 筛选、凭证导入，以及按服务标注的
   `CN` / `Global(CB)` / `Global(WB)` 徽章与按能力的签到按钮。
@@ -73,7 +74,8 @@ plugins:
 `/v0/resource/plugins/workbuddy/panel`），点 **添加账号**，选择区域后完成授权：
 
 - **国内版（codebuddy.cn）** 走现有 CodeBuddy CN 网关。
-- **国际版（codebuddy.ai）** 登录 CodeBuddy 国际服务。
+- **国际版（workbuddy.ai）** 登录 WorkBuddy 国际服务（本插件历史上的「国际版」）。
+- **CodeBuddy 国际版（codebuddy.ai）** 登录 CodeBuddy 国际服务，与上面是两个独立服务。
 
 面板只接收会话 ID 和授权链接，令牌在后端交换并写入 auth store，不会回显到页面。
 关闭弹窗或重新发起会取消上一个会话；旧会话的迟到响应不会覆盖当前登录。

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.1
+
+### Fix: the 国际版 option logged in to the wrong service
+
+- The add-account dialog mapped 国际版 to CodeBuddy international
+  (`www.codebuddy.ai`). This plugin has always defined 国际版 as the WorkBuddy
+  international service (`workbuddy.ai`) — that is what `isGlobalDomain`
+  classifies as global and what existing Global credentials carry — so choosing
+  国际版 sent users to a different service than before. 国际版 now targets
+  `workbuddy.ai` again.
+- CodeBuddy international is kept as its own explicitly labeled option
+  (CodeBuddy 国际版 / `codebuddy.ai`) rather than reusing the 国际版 label. The
+  two are separate services with separate credentials and must not be conflated.
+- The login dialog now names the service being authorized, so the selected
+  region is visible before and during the flow.
+
 ## 0.10.0
 
 ### Dual-region accounts: CN, CodeBuddy international, WorkBuddy international

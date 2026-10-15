@@ -228,7 +228,8 @@ button .spin{border-color:var(--on-acc);border-top-color:transparent}
       <p class="hint">选择要登录的服务，然后在打开的页面完成授权。令牌只写入 CPA 凭证库，不会显示在这里。</p>
       <div class="region-pick" id="regionPick">
         <label><input type="radio" name="addRegion" value="cn" checked> 国内版（codebuddy.cn）</label>
-        <label><input type="radio" name="addRegion" value="global"> 国际版（codebuddy.ai）</label>
+        <label><input type="radio" name="addRegion" value="workbuddy-global"> 国际版（workbuddy.ai）</label>
+        <label><input type="radio" name="addRegion" value="codebuddy-global"> CodeBuddy 国际版（codebuddy.ai）</label>
       </div>
       <div id="addBody" class="add-body"></div>
     </div>
@@ -1123,19 +1124,22 @@ async function startAddLogin(btn){
     const d=await api("/login/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({region})});
     if(attempt!==addAttempt) return;
     if(!d.success){setAddStatus(d.error||"发起登录失败","err");return}
-    addSession={id:d.session_id,url:d.url};
-    renderAddURL(d.url);
+    addSession={id:d.session_id,url:d.url,service:d.service,region:d.region};
+    renderAddURL(d.url,d.service);
     try{window.open(d.url,"_blank","noopener")}catch(_){}
     pollAddLogin(attempt);
   }catch(e){
     if(attempt===addAttempt) setAddStatus(e.message||"发起登录失败","err");
   }finally{busy(btn,false)}
 }
-function renderAddURL(url){
+function renderAddURL(url,service){
   const body=document.getElementById("addBody");
   if(!body)return;
+  const who=service==="codebuddy-global"?"CodeBuddy 国际版（codebuddy.ai）"
+    :service==="workbuddy-global"?"国际版（workbuddy.ai）"
+    :"国内版（codebuddy.cn）";
   body.innerHTML=
-    '<p class="add-step">在打开的页面完成授权。若未自动打开，请复制下面的链接手动访问：</p>'+
+    '<p class="add-step">正在为 <strong>'+esc(who)+'</strong> 授权。若未自动打开，请复制下面的链接手动访问：</p>'+
     '<div class="add-url"><input id="addUrl" readonly value="'+esc(url)+'">'+
     '<button type="button" class="sec" onclick="copyAddURL(this)">复制</button>'+
     '<button type="button" class="sec" onclick="openAddURL()">打开</button></div>'+
