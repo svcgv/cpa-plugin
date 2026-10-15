@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.4
+
+### Fix panel OAuth link handling
+
+- Open the URL returned by `resolveAuthURL`, which decodes the percent-encoded
+  field that survives CPA's HTML escaping. The previous code displayed the
+  corrected URL but still passed the raw, HTML-escaped field to `window.open`,
+  so the browser lost OAuth query parameters including `state`.
+- Update only the status row while polling, keeping the authorization URL and
+  copy/open controls available until the session completes or is cancelled.
+
 ## 0.10.3
 
 ### Fix CodeBuddy international OAuth completion

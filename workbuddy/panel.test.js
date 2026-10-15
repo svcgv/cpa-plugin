@@ -654,3 +654,52 @@ test("resolveAuthURL tolerates a missing or malformed payload", () => {
   assert.equal(context.resolveAuthURL(null), "");
   assert.equal(context.resolveAuthURL({ url_encoded: "%%%not-hex" }), "%%%not-hex");
 });
+
+test("automatic and manual login links use the decoded authorization URL and polling keeps them", async () => {
+  const calls = [];
+  const scheduled = [];
+  const expected = "https://www.codebuddy.ai/login?loginSessionId=abc&platform=ide&state=S1&version=5.3.14";
+  const { context, document, elements } = loadPanel({
+    sessionEntries: [["workbuddy-mgmt-key", "k"]],
+    fetch: async (url, opts) => {
+      calls.push({ url, body: opts && opts.body });
+      if (String(url).includes("/login/start")) {
+        return fakeResponse(200, "application/json", JSON.stringify({
+          success: true,
+          session_id: "s-url",
+          service: "codebuddy-global",
+          region: "global",
+          // This is what CPA 7.2.x returns after htmlsanitize.JSONBody.
+          url: expected.replace(/&/g, "&amp;"),
+          url_encoded: encodeURIComponent(expected),
+        }));
+      }
+      return fakeResponse(200, "application/json", JSON.stringify({
+        status: "pending",
+        message: "等待浏览器完成授权",
+      }));
+    },
+  });
+
+  context.document.querySelector = () => ({ value: "codebuddy-global", checked: true });
+  const opened = [];
+  context.open = url => { opened.push(url); };
+  context.setTimeout = fn => { scheduled.push(fn); return scheduled.length; };
+  context.clearTimeout = () => {};
+
+  await context.startAddLogin(document.getElementById("addStartBtn"));
+
+  assert.equal(opened[0], expected, "automatic popup must use the decoded URL");
+  const body = document.getElementById("addBody").innerHTML;
+  assert.ok(body.includes(expected.replace(/&/g, "&amp;")), "manual link must render the decoded URL safely");
+  assert.ok(body.includes("id=\"addUrl\""), "manual URL input must remain visible");
+  assert.ok(body.includes("复制") && body.includes("打开"), "copy/open controls must remain visible");
+
+  await scheduled.shift()();
+  const afterPending = document.getElementById("addBody").innerHTML;
+  assert.ok(afterPending.includes("id=\"addUrl\""), "pending poll must not remove the authorization URL");
+  assert.ok(afterPending.includes("复制") && afterPending.includes("打开"), "pending poll must retain URL actions");
+  assert.equal(elements.get("addStatus").textContent, "等待浏览器完成授权", "pending message should be updated");
+  context.openAddURL();
+  assert.equal(opened[1], expected, "manual open must use the same decoded URL");
+});

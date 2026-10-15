@@ -1109,6 +1109,14 @@ function renderAddBody(message){
 function setAddStatus(text,kind){
   const body=document.getElementById("addBody");
   if(!body)return;
+  // Keep the authorization URL and its copy/open controls visible while the
+  // session is pending or reports an error. Replace only the status row.
+  const status=document.getElementById("addStatus");
+  if(status){
+    status.className="add-status "+(kind||"");
+    status.textContent=String(text||"");
+    return;
+  }
   body.innerHTML=`<div class="add-status ${kind||""}">${esc(text)}</div>`;
 }
 function stopAddPoll(){
@@ -1127,7 +1135,7 @@ async function startAddLogin(btn){
     const url=resolveAuthURL(d);
     addSession={id:d.session_id,url:url,service:d.service,region:d.region};
     renderAddURL(url,d.service);
-    try{window.open(d.url,"_blank","noopener")}catch(_){}
+    try{window.open(url,"_blank","noopener")}catch(_){}
     pollAddLogin(attempt);
   }catch(e){
     if(attempt===addAttempt) setAddStatus(e.message||"发起登录失败","err");
