@@ -1,0 +1,31 @@
+registry.json
+  s_2d1b1562b785f0::t_b079813309361d 9
+workbuddy/panel.test.js
+  s_2d1b1562b785f0::t_cba017608b120e 694
+  s_2d1b1562b785f0::t_cc967bc20a0b81 657-661,663-693,695-701,703-705
+  s_2d1b1562b785f0::t_a8f5be1f316440 662,702
+workbuddy/panel.html
+  s_2d1b1562b785f0::t_3721b46a59120a 1112-1119,1138,1290
+workbuddy/main.go
+  s_2d1b1562b785f0::t_b079813309361d 346
+workbuddy/CHANGELOG.md
+  s_2d1b1562b785f0::t_27ff016fb958ac 3-13
+workbuddy/VERSION
+  s_2d1b1562b785f0::t_6f8b818097c0a1 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "86ba8409b9236f38523944841acbae877762c036",
+  "prompts": {},
+  "sessions": {
+    "s_2d1b1562b785f0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13eec-bae4-74d3-97b9-78c1985c2096",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
