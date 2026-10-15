@@ -116,9 +116,14 @@ func handlePanelLoginStart(req pluginapi.ManagementRequest) map[string]any {
 		"success":    true,
 		"session_id": session.ID,
 		"url":        authURL,
-		"region":     "cn",
-		"service":    "qoder-cn",
-		"expires_at": session.ExpiresAt.UTC().Format(time.RFC3339),
+		// CPA HTML-escapes every string in a plugin management response, so the
+		// "&" separators of this URL would reach the panel as "&amp;" and the
+		// browser would parse "amp;nonce"/"amp;challenge" as query keys. The
+		// percent-encoded form contains no "&" and survives intact.
+		"url_encoded": url.QueryEscape(authURL),
+		"region":      "cn",
+		"service":     "qoder-cn",
+		"expires_at":  session.ExpiresAt.UTC().Format(time.RFC3339),
 	}
 }
 

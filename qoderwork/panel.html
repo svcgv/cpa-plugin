@@ -890,13 +890,31 @@ async function startAddLogin(btn){
     const d=await api("/login/start",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
     if(attempt!==addAttempt) return;
     if(!d.success){setAddStatus(d.error||"发起登录失败","err");return}
-    addSession={id:d.session_id,url:d.url};
-    renderAddURL(d.url);
+    const url=qwSafeURL(d);
+    addSession={id:d.session_id,url:url};
+    renderAddURL(url);
     try{window.open(d.url,"_blank","noopener")}catch(_){}
     pollAddLogin(attempt);
   }catch(e){
     if(attempt===addAttempt) setAddStatus(e.message||"发起登录失败","err");
   }finally{busy(btn,false)}
+}
+// hostUnescape repairs values CPA HTML-escaped on the way out: the host escapes
+// every string in a plugin management response, turning "&" into "&amp;".
+function hostUnescape(v){
+  return String(v==null?"":v)
+    .replace(/&amp;/g,"&").replace(/&#0*38;/g,"&")
+    .replace(/&lt;/g,"<").replace(/&gt;/g,">")
+    .replace(/&quot;/g,'"').replace(/&#0*39;/g,"'").replace(/&#x27;/gi,"'");
+}
+// qwSafeURL prefers the percent-encoded authorization URL, which the host cannot
+// corrupt.
+function qwSafeURL(d){
+  const enc=d&&d.url_encoded;
+  if(enc){
+    try{return decodeURIComponent(hostUnescape(enc))}catch(_){return hostUnescape(enc)}
+  }
+  return hostUnescape(d&&d.url);
 }
 function renderAddURL(url){
   const body=document.getElementById("addBody");
