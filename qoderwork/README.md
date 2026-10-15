@@ -7,7 +7,8 @@
 | 能力 | 说明 |
 |---|---|
 | **双登录方式** | ① OAuth 设备授权（PKCE，浏览器授权，dt- 30 天 + drt- 1 年自动旋转）② PAT 导入（pt-，长期有效兜底）——两家族可共存于同一 auth 文件 |
-| **登录自动领包** | OAuth 登录成功后自动判断并领取一次性 Pro 升级包（eligibility → claim） |
+| **面板 OAuth 登录** | 面板「OAuth 登录」弹窗直接发起设备授权：显示授权链接、可复制/打开、可取消、可重试；登录成功后自动刷新该账号额度与签到状态。仅国内版 qoder.com.cn，不提供国际版选项 |
+| **Pro 领取** | 面板手动「领取 Pro」：先查 eligibility，可领才 claim 一次性 Pro 升级包（+1800），不自动领取 |
 | **COSY 推理** | RSA 包 AES 会话密钥 + MD5 请求签名，对接 gateway.qoder.com.cn SSE 流式 |
 | **动态模型** | COSY 拉取 `/algo/api/v2/model/list`（chat scene），10 静态模型兜底 |
 | **每日签到** | 面板手动签到（单账号/批量）+ 09:00/21:00 定时自动签到，签到后返回最新积分快照 |
@@ -56,9 +57,16 @@ oauth-model-alias:
 
 ### 方式一：OAuth 登录（推荐）
 
-1. CPA 管理面板 → Auth 文件 → QoderWork OAuth 登录卡片
-2. 浏览器打开授权链接 → 登录 qoder.com.cn（阿里云 SSO）→ 点 Continue 授权
-3. 插件自动轮询拿 token 落盘（dt-/drt-），并自动领取 Pro 升级包（若 eligible）
+在插件面板点 **OAuth 登录**，弹窗会给出授权链接：
+
+1. 点「打开」或在浏览器访问该链接 → 登录 qoder.com.cn（阿里云 SSO）→ 点 Continue 授权
+2. 插件自动轮询拿 token 落盘（dt-/drt-），成功后立即刷新该账号卡片
+3. 关闭弹窗或重新发起会取消上一个会话；旧会话的迟到结果不会覆盖新登录
+
+PAT 与新 token 家族可共存：重新用 OAuth 登录同一账号时，已存在的 `pt-` PAT 会保留，
+继续作为刷新兜底。
+
+也可以继续用 CPA 自带的 QoderWork OAuth 登录卡片，两者等价。
 
 ### 方式二：PAT 导入
 

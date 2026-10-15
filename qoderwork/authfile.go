@@ -279,3 +279,17 @@ func deleteAuthFileInDir(path, dir string) error {
 	}
 	return err
 }
+
+// persistPanelAuth writes a credential created by the panel login dialog.
+// Success is what makes a panel login report "success", so a failure here must
+// surface to the caller rather than leave a session that claims to be done.
+func persistPanelAuth(sa *storedAuth) error {
+	if sa == nil {
+		return fmt.Errorf("nil storedAuth")
+	}
+	raw, err := buildAuthFileJSON(sa, false, displayNote(sa, nil, false), nil)
+	if err != nil {
+		return err
+	}
+	return hostAuthPersist(authFileNameFor(sa), "", raw)
+}

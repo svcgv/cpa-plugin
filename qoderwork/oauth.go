@@ -288,12 +288,16 @@ func handleStartLogin(raw []byte) ([]byte, error) {
 // pollDeviceToken performs one GET against /api/v1/deviceToken/poll.
 // Returns (tok, pending, error): pending=true means the user hasn't finished
 // authorizing yet (upstream 404/202) — the host should keep polling.
+// devicePollBase is the OpenAPI base the device-token poll targets. It is a var
+// so tests can point the flow at a local server without a network call.
+var devicePollBase = upstreamBaseCN
+
 func pollDeviceToken(nonce, verifier string) (*deviceTokenResponse, bool, error) {
 	q := url.Values{}
 	q.Set("nonce", nonce)
 	q.Set("verifier", verifier)
 	q.Set("challenge_method", "S256")
-	fullURL := upstreamBaseCN + "/api/v1/deviceToken/poll?" + q.Encode()
+	fullURL := devicePollBase + "/api/v1/deviceToken/poll?" + q.Encode()
 
 	req, err := http.NewRequest(http.MethodGet, fullURL, nil)
 	if err != nil {
@@ -451,6 +455,13 @@ func deviceExpiryUnix(tok *deviceTokenResponse) int64 {
 // the panel fills it lazily on first load. preservePAT=false skips the
 // hostAuthList scan to avoid blocking auth-file persistence.
 func buildStoredAuthFromDeviceToken(tok *deviceTokenResponse, ui *userInfoResponse) *storedAuth {
+	return buildStoredAuthFromDeviceTokenWithPAT(tok, ui, "")
+}
+
+// buildStoredAuthFromDeviceTokenWithPAT is the same mapping, but carries a
+// previously stored PAT so an OAuth re-login keeps the long-lived fallback
+// credential instead of silently dropping it.
+func buildStoredAuthFromDeviceTokenWithPAT(tok *deviceTokenResponse, ui *userInfoResponse, pat string) *storedAuth {
 	expiresAt := deviceExpiryUnix(tok)
 	uid := tok.UserID
 	nickname := ""
@@ -473,7 +484,7 @@ func buildStoredAuthFromDeviceToken(tok *deviceTokenResponse, ui *userInfoRespon
 		Auth: storedTokens{
 			AccessToken:   tok.accessToken(),
 			RefreshToken:  tok.RefreshToken,
-			PersonalToken: "", // PAT coalescing happens on keepalive, not here
+			PersonalToken: pat,
 			ExpiresAt:     expiresAt,
 			Domain:        "qoder.com.cn",
 		},
@@ -489,10 +500,16 @@ func buildStoredAuthFromDeviceToken(tok *deviceTokenResponse, ui *userInfoRespon
 // be called during PollLogin (delays auth file persistence). It is safe to
 // call during keepalive/refresh which happens long after the file is written.
 func existingPATForUID(uid string) string {
+	return existingPATForUIDVia(uid, hostAuthList, hostAuthGet)
+}
+
+// existingPATForUIDVia is the injectable form, so tests can supply the auth
+// store contents without a host bridge.
+func existingPATForUIDVia(uid string, list func() ([]pluginapi.HostAuthFileEntry, error), get func(string) (*storedAuth, error)) string {
 	if uid == "" {
 		return ""
 	}
-	files, err := hostAuthList()
+	files, err := list()
 	if err != nil {
 		return ""
 	}
@@ -500,7 +517,7 @@ func existingPATForUID(uid string) string {
 		if !strings.HasPrefix(strings.ToLower(f.Name), providerName+"-") {
 			continue
 		}
-		sa, err := hostAuthGet(f.AuthIndex)
+		sa, err := get(f.AuthIndex)
 		if err != nil || sa == nil {
 			continue
 		}
