@@ -1,0 +1,67 @@
+qoderwork/models_test.go
+  s_c3436cc3d7705c::t_600235087ef0cc 30-32
+  s_c3436cc3d7705c::t_c3dc4e1132b4c0 10,148-173
+  s_c3436cc3d7705c::t_66d20f4d62f3b9 7-8,174-213
+  s_c3436cc3d7705c::t_38dbce47b35375 1-6,9,11-29,33-147,214-215
+qoderwork/encoding.go
+  s_c3436cc3d7705c::t_bd4a81d7ac0bc0 71-74,76-77
+  s_c3436cc3d7705c::t_ea74c42e1cb67c 11
+  s_c3436cc3d7705c::t_8b7dc2efc8285e 54-70,75,78-79
+qoderwork/models.go
+  s_c3436cc3d7705c::t_8d7894369f47af 8,12,15,56-70,80,106-145,150,156-157,164-165,172-173,186-192,194,197,202-203,217,219,225-284,288-311,315-316,319-325,328-330,333,336-408,411-418,421-444,448
+  s_c3436cc3d7705c::t_8b7dc2efc8285e 178-183
+  s_c3436cc3d7705c::t_4e18f6440a3568 71-79,81-105,151-153,199-200,210-211,473
+  s_c3436cc3d7705c::t_12029ae47f4d80 198,212,453-472,474-480
+qoderwork/management.go
+  s_c3436cc3d7705c::t_12029ae47f4d80 132-133,201-204
+qoderwork/panel_login.go
+  s_c3436cc3d7705c::t_825bd0334af71e 34,111,188
+  s_c3436cc3d7705c::t_ec999b67d2071d 95
+qoderwork/sign.go
+  s_c3436cc3d7705c::t_b5cb48c2a7bb94 21,174-177,180,186-196,212-225,261-269,273,278-279,282-285,307
+  s_c3436cc3d7705c::t_a79f723fea2d37 226-232,270-272,274-277,281,286-288
+  s_c3436cc3d7705c::t_66d20f4d62f3b9 280,289-305
+  s_c3436cc3d7705c::t_b57e66cd5f4bbb 119-122,124-131
+  s_c3436cc3d7705c::t_d003bfc49951b3 306
+qoderwork/cosy_session.go
+  s_c3436cc3d7705c::t_b57e66cd5f4bbb 8,10-11,54-61,84-97
+qoderwork/official_machine.go
+  s_c3436cc3d7705c::t_66d20f4d62f3b9 1-121
+registry.json
+  s_c3436cc3d7705c::t_03eb4080f37cc8 25,27
+qoderwork/panel_login_test.go
+  s_c3436cc3d7705c::t_72f70b7b808983 137-142
+qoderwork/main.go
+  s_c3436cc3d7705c::t_255d6b2b307fc8 520,528
+  s_c3436cc3d7705c::t_72f70b7b808983 472-477
+  s_c3436cc3d7705c::t_600235087ef0cc 99
+  s_c3436cc3d7705c::t_409e6e3323b635 373-378
+  s_c3436cc3d7705c::t_90cbb8a2d21f07 113
+  s_c3436cc3d7705c::t_777a8cc5d01780 379
+qoderwork/oauth.go
+  s_c3436cc3d7705c::t_66d20f4d62f3b9 253-255
+  s_c3436cc3d7705c::t_90cbb8a2d21f07 300,432
+  s_c3436cc3d7705c::t_ec999b67d2071d 29,239-252,256-262,287
+qoderwork/CHANGELOG.md
+  s_c3436cc3d7705c::t_f9656018f0e5fd 1-34
+qoderwork/README.md
+  s_c3436cc3d7705c::t_3efb74a67d4236 13,101-116
+qoderwork/VERSION
+  s_c3436cc3d7705c::t_481f4af4b5afef 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "269e6aa2ee9cf68c8ad930615dd933ac89d15ac4",
+  "prompts": {},
+  "sessions": {
+    "s_c3436cc3d7705c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1400d-1022-78f3-85d8-9c7b661b9ae0",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
