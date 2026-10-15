@@ -96,9 +96,12 @@ const (
 	// CN endpoint aliases (login / chat). upstreamBaseCN is the only
 	// CN base; Global has its own upstreamBaseGlobal. No "upstreamBase" legacy
 	// alias — removed in v0.6.31 dead-code sweep.
-	endpointAuthState    = upstreamBaseCN + "/v2/plugin/auth/state?platform=CLI"
-	endpointLoginAcct    = upstreamBaseCN + "/v2/plugin/login/account?state="
-	endpointAuthToken    = upstreamBaseCN + "/v2/plugin/auth/token?state="
+	endpointAuthState = upstreamBaseCN + "/v2/plugin/auth/state?platform=CLI"
+	// Bare endpoints: buildAuthTokenRequest/buildLoginAccountRequest append
+	// "?state=<state>". Keeping the query out of the constant prevents a doubled
+	// "?state=?state=" that silently breaks the CN login poll.
+	endpointLoginAcct    = upstreamBaseCN + "/v2/plugin/login/account"
+	endpointAuthToken    = upstreamBaseCN + "/v2/plugin/auth/token"
 	endpointTokenRefresh = upstreamBaseCN + "/v2/plugin/auth/token/refresh"
 	endpointChat         = upstreamBaseCN + "/v2/chat/completions"
 
@@ -340,7 +343,7 @@ type registrationCapability struct {
 }
 
 // version is injected at build time via -ldflags "-X main.version=...".
-var version = "0.10.1"
+var version = "0.10.2"
 
 func wbRegistration() registration {
 	return registration{

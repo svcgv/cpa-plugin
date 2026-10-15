@@ -534,3 +534,109 @@ func TestRefreshDoesNotAdoptCrossServiceDomain(t *testing.T) {
 		t.Fatalf("service after refresh = %q, want codebuddy-global", serviceFor(returned))
 	}
 }
+
+// CPA HTML-escapes every string in a plugin management response, so a bare "&"
+// in the authorization URL reaches the panel as "&amp;" and the browser then
+// treats "amp;state" as a query key — the state is lost and the login never
+// completes. The response must therefore carry a form the host cannot corrupt.
+func TestPanelLoginURLCarriesEncodedFormSurvivingHostEscaping(t *testing.T) {
+	f := &loginFakeUpstream{}
+	withLoginUpstream(t, f)
+
+	out := handlePanelLoginStart(mgmtReq(t, map[string]any{"region": "codebuddy-global"}))
+	if out["success"] != true {
+		t.Fatalf("start failed: %#v", out)
+	}
+	raw, _ := out["url"].(string)
+	encoded, _ := out["url_encoded"].(string)
+	if raw == "" || encoded == "" {
+		t.Fatalf("expected both url and url_encoded, got %#v", out)
+	}
+
+	// Simulate the host's escaping step on the whole JSON body.
+	escaped := simulateHostEscaping(raw)
+	if !strings.Contains(escaped, "&amp;") {
+		t.Skip("upstream URL had no query separators to escape")
+	}
+
+	// The panel decodes url_encoded, which must survive escaping byte-for-byte.
+	decoded, err := url.QueryUnescape(escapedQueryField(encoded))
+	if err != nil {
+		t.Fatalf("url_encoded did not survive the host escaping step: %v (%q)", err, encoded)
+	}
+	if decoded != raw {
+		t.Fatalf("decoded url = %q, want %q", decoded, raw)
+	}
+
+	// Prove the failure mode: parsing the host-escaped raw URL loses the state.
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := u.Query()
+	if q.Get("state") == "" {
+		t.Fatalf("test setup: raw URL should carry a state, got %q", raw)
+	}
+	escapedURL, err := url.Parse(escaped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := escapedURL.Query().Get("state"); got != "" {
+		t.Fatalf("expected the escaped URL to lose its state (that is the bug), got %q", got)
+	}
+	// Go's url.Query() silently drops the corrupted pairs, so the observable
+	// damage is that 'state' is gone and the other parameters no longer parse.
+	if got := escapedURL.Query().Get("platform"); got != "" {
+		t.Fatalf("expected 'platform' to become unreadable, got %q", got)
+	}
+	if len(escapedURL.Query()) >= len(u.Query()) {
+		t.Fatalf("expected the escaped URL to lose query parameters: escaped=%v raw=%v",
+			escapedURL.Query(), u.Query())
+	}
+}
+
+// simulateHostEscaping mirrors the host's html.EscapeString pass over JSON
+// string values (internal/htmlsanitize.JSONBody).
+func simulateHostEscaping(s string) string {
+	r := strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+		`"`, "&quot;",
+		"'", "&#x27;",
+	)
+	return r.Replace(s)
+}
+
+// escapedQueryField models the panel's hostUnescape on a received value.
+func escapedQueryField(v string) string {
+	return simulateHostEscaping(v) // escaping is idempotent for '%26'-only input
+}
+
+// The CN token/account endpoints must not carry "?state=" in the constant: the
+// request builder appends it, and doubling it breaks the login poll.
+func TestCNLoginEndpointsHaveNoDoubledStateQuery(t *testing.T) {
+	for _, mode := range []string{oauthClientModeCLI, oauthClientModeWorkBuddy} {
+		p := oauthProfileForService(serviceCN, mode)
+		tok, err := buildAuthTokenRequest(p, "STATE1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Count(tok.URL.String(), "state=") != 1 {
+			t.Fatalf("[%s] token URL has a doubled state query: %s", mode, tok.URL)
+		}
+		if got := tok.URL.Query().Get("state"); got != "STATE1" {
+			t.Fatalf("[%s] token state = %q, want STATE1", mode, got)
+		}
+		acct, err := buildLoginAccountRequest(p, "STATE1", "TOKEN")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Count(acct.URL.String(), "state=") != 1 {
+			t.Fatalf("[%s] account URL has a doubled state query: %s", mode, acct.URL)
+		}
+		if got := acct.URL.Query().Get("state"); got != "STATE1" {
+			t.Fatalf("[%s] account state = %q, want STATE1", mode, got)
+		}
+	}
+}

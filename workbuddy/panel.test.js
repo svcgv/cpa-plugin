@@ -615,3 +615,42 @@ test("a late poll result cannot revive a superseded attempt", async () => {
   const body = context.document.getElementById("addBody");
   assert.ok(!/登录成功/.test(body.innerHTML || ""), "stale poll rendered a success state");
 });
+
+// CPA HTML-escapes every string in a plugin management response, so the "&"
+// separators of an authorization URL arrive as "&amp;". The panel must use the
+// percent-encoded field so the state/nonce parameters survive.
+test("authorization URL survives the host's HTML escaping", () => {
+  const { context } = loadPanel();
+  const real = "https://www.codebuddy.ai/login?loginSessionId=abc&platform=ide&state=S1&version=5.3.14";
+  const hostEscaped = real.replace(/&/g, "&amp;");
+
+  // The raw field alone would be corrupted.
+  assert.notEqual(hostEscaped, real);
+  assert.ok(hostEscaped.indexOf("&amp;") >= 0);
+
+  // With url_encoded present the panel recovers the exact URL.
+  const encoded = encodeURIComponent(real);
+  const resolved = context.resolveAuthURL({ url: hostEscaped, url_encoded: encoded });
+  assert.equal(resolved, real);
+  const u = new URL(resolved);
+  assert.equal(u.searchParams.get("state"), "S1");
+  assert.equal(u.searchParams.get("platform"), "ide");
+});
+
+// Even without the encoded field, a host-escaped URL must be repaired rather
+// than opened with a broken query.
+test("host-escaped URL is unescaped when no encoded form is present", () => {
+  const { context } = loadPanel();
+  const real = "https://www.workbuddy.ai/login?platform=ide&state=S2";
+  const hostEscaped = real.replace(/&/g, "&amp;");
+  const resolved = context.resolveAuthURL({ url: hostEscaped });
+  assert.equal(resolved, real);
+  assert.equal(new URL(resolved).searchParams.get("state"), "S2");
+});
+
+test("resolveAuthURL tolerates a missing or malformed payload", () => {
+  const { context } = loadPanel();
+  assert.equal(context.resolveAuthURL({}), "");
+  assert.equal(context.resolveAuthURL(null), "");
+  assert.equal(context.resolveAuthURL({ url_encoded: "%%%not-hex" }), "%%%not-hex");
+});

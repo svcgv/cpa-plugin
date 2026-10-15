@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -212,9 +213,15 @@ func handlePanelLoginStart(req pluginapi.ManagementRequest) map[string]any {
 		"success":    true,
 		"session_id": session.ID,
 		"url":        authURL,
-		"region":     service.region(),
-		"service":    string(service),
-		"expires_at": session.ExpiresAt.UTC().Format(time.RFC3339),
+		// CPA HTML-escapes every string in a plugin management response, so a
+		// bare "&" in this URL reaches the panel as "&amp;" and the browser then
+		// sees "amp;platform"/"amp;state" as query keys — the state is lost and
+		// the login silently never completes. url_encoded is the percent-encoded
+		// form, which contains no "&" to escape; the panel decodes it.
+		"url_encoded": url.QueryEscape(authURL),
+		"region":      service.region(),
+		"service":     string(service),
+		"expires_at":  session.ExpiresAt.UTC().Format(time.RFC3339),
 	}
 }
 

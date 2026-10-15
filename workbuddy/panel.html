@@ -1124,13 +1124,32 @@ async function startAddLogin(btn){
     const d=await api("/login/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({region})});
     if(attempt!==addAttempt) return;
     if(!d.success){setAddStatus(d.error||"发起登录失败","err");return}
-    addSession={id:d.session_id,url:d.url,service:d.service,region:d.region};
-    renderAddURL(d.url,d.service);
+    const url=resolveAuthURL(d);
+    addSession={id:d.session_id,url:url,service:d.service,region:d.region};
+    renderAddURL(url,d.service);
     try{window.open(d.url,"_blank","noopener")}catch(_){}
     pollAddLogin(attempt);
   }catch(e){
     if(attempt===addAttempt) setAddStatus(e.message||"发起登录失败","err");
   }finally{busy(btn,false)}
+}
+// hostUnescape repairs values that CPA HTML-escaped on the way out. The host
+// escapes every string in a plugin management response, which turns "&" into
+// "&amp;" and would otherwise corrupt an authorization URL's query.
+function hostUnescape(v){
+  return String(v==null?"":v)
+    .replace(/&amp;/g,"&").replace(/&#0*38;/g,"&")
+    .replace(/&lt;/g,"<").replace(/&gt;/g,">")
+    .replace(/&quot;/g,'"').replace(/&#0*39;/g,"'").replace(/&#x27;/gi,"'");
+}
+// resolveAuthURL resolves the authorization URL for this login. The
+// percent-encoded field is preferred because the host's escaping cannot alter it.
+function resolveAuthURL(d){
+  const enc=d&&d.url_encoded;
+  if(enc){
+    try{return decodeURIComponent(hostUnescape(enc))}catch(_){return hostUnescape(enc)}
+  }
+  return hostUnescape(d&&d.url);
 }
 function renderAddURL(url,service){
   const body=document.getElementById("addBody");

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.10.2
+
+### Fix: panel login never completed
+
+- The CN token/account endpoints kept "?state=" in their constants while the
+  request builder appended "?state=" again, producing a doubled
+  "?state=?state=". CN login polling and account lookup were sent to a
+  malformed URL.
+- CPA HTML-escapes every string in a plugin management response, so the "&"
+  separators of the authorization URL reached the panel as "&amp;". The browser
+  then saw "amp;state"/"amp;platform" as query keys, the state was lost, and the
+  login silently never finished. The panel now uses a percent-encoded URL that
+  the escaping cannot alter, and repairs an escaped value defensively.
+
 ## 0.10.1
 
 ### Fix: the 国际版 option logged in to the wrong service
