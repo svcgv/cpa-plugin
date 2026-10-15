@@ -1,0 +1,23 @@
+registry.json
+  s_2d1b1562b785f0::t_2a04dfcc737b7d 7,9,25,27
+.gitignore
+  s_2d1b1562b785f0::t_67980747130894 10
+README.md
+  s_2d1b1562b785f0::t_106b365c7aed57 9-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0a75c0162fa2a0e47ae20a6047ae62509df79802",
+  "prompts": {},
+  "sessions": {
+    "s_2d1b1562b785f0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13eec-bae4-74d3-97b9-78c1985c2096",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
