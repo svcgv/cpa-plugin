@@ -52,7 +52,10 @@ func modelAuthIdentityFor(authID string, sa *storedAuth) (modelAuthIdentity, err
 	}
 	realm, err := workBuddyRealmFromAccessToken(sa.Auth.AccessToken)
 	if err != nil {
-		realm = workBuddyRealm(accountRegion(sa))
+		// Opaque or unparsable tokens fall back to the credential's service so
+		// CN, CodeBuddy-international and WorkBuddy-international caches stay
+		// separated even without a decodable issuer.
+		realm = realmForService(serviceFor(sa))
 	}
 	identity := modelAuthIdentity{
 		Provider:     providerName,
@@ -221,7 +224,7 @@ func validateModelCatalogCache(cache modelCatalogCacheV1, identitySHA256 string,
 	if !validModelIdentitySHA256(cache.IdentitySHA256) || cache.IdentitySHA256 != identitySHA256 {
 		return fmt.Errorf("model cache identity does not match")
 	}
-	if expectedRealm != workBuddyRealmCN && expectedRealm != workBuddyRealmGlobal {
+	if !expectedRealm.valid() {
 		return fmt.Errorf("expected model cache realm is invalid")
 	}
 	if cache.Realm != expectedRealm {

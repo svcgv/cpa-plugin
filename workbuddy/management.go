@@ -20,12 +20,7 @@ type managementRequestWire struct {
 	HostCallbackID string `json:"host_callback_id,omitempty"`
 }
 
-// billingBase hosts the Buddy-gas-station check-in and resource-package APIs.
-// It is a var (not const) so tests can override it with an httptest server.
-var billingBase = "https://www.codebuddy.cn"
-
-// billingBaseGlobal is the international (www.workbuddy.ai) billing base.
-var billingBaseGlobal = "https://www.workbuddy.ai"
+// Billing bases live in region.go alongside the service → host mapping.
 
 // If the panel later wants to surface "usage export ready", re-add it and wire
 // it into buildDashboardEx's response.
@@ -60,7 +55,12 @@ type packageSummary struct {
 }
 
 type checkinSummary struct {
+	// Active mirrors the upstream activity flag. activityFlagPresent records
+	// whether the upstream actually sent it; an absent flag must not be read as
+	// "no activity".
 	Active          bool     `json:"active"`
+	Capability      string   `json:"capability,omitempty"`
+	CapabilityNote  string   `json:"capability_note,omitempty"`
 	TodayCheckedIn  bool     `json:"today_checked_in"`
 	StreakDays      int64    `json:"streak_days"`
 	DailyCredit     int64    `json:"daily_credit"`
@@ -70,6 +70,13 @@ type checkinSummary struct {
 	ActivityName    string   `json:"activity_name"`
 	Season          int64    `json:"season"`
 	CheckinDates    []string `json:"checkin_dates,omitempty"`
+
+	activityFlagPresent bool
+}
+
+// actedOnActivity reports whether the payload carried an explicit activity flag.
+func (c *checkinSummary) actedOnActivity() bool {
+	return c != nil && c.activityFlagPresent
 }
 
 // with a transient error (HTTP 5xx or transport error). codebuddy.cn
@@ -174,6 +181,9 @@ func managementRegistration() managementRegistrationResponse {
 			{Method: http.MethodPost, Path: base + "/checkin/config", Description: "Toggle auto check-in (enabled: true/false)."},
 			{Method: http.MethodGet, Path: base + "/credits", Description: "Get real-time credits for one (auth_index query) or all accounts."},
 			{Method: http.MethodPost, Path: base + "/import", Description: "Import WorkBuddy credential JSON (nested or flat) into host auth store."},
+			{Method: http.MethodPost, Path: base + "/login/start", Description: "Start a panel login for one region (body: {region: cn|global}). Returns the authorization URL and a session id."},
+			{Method: http.MethodPost, Path: base + "/login/status", Description: "Poll a panel login session (body: {session_id}). Persists the credential on success."},
+			{Method: http.MethodPost, Path: base + "/login/cancel", Description: "Cancel a panel login session (body: {session_id})."},
 			{Method: http.MethodPost, Path: base + "/trial", Description: "Claim expert trial pack for one Global account (auth_index). One-time 250 credits / 14 days."},
 			{Method: http.MethodPost, Path: base + "/select", Description: "Select the active account card used for chat routing (body: {auth_index})."},
 			{Method: http.MethodPost, Path: base + "/keepalive", Description: "Manually refresh access tokens for all accounts (or one with auth_index)."},
@@ -244,6 +254,12 @@ func handleManagement(raw []byte) ([]byte, error) {
 		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleCreditsQueryWithCallback(req.ManagementRequest, req.HostCallbackID)))
 	case req.Method == http.MethodPost && path == base+"/import":
 		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleImportAuth(req.ManagementRequest)))
+	case req.Method == http.MethodPost && path == base+"/login/start":
+		return okEnvelope(mgmtJSONResponse(http.StatusOK, handlePanelLoginStart(req.ManagementRequest)))
+	case req.Method == http.MethodPost && path == base+"/login/status":
+		return okEnvelope(mgmtJSONResponse(http.StatusOK, handlePanelLoginStatus(req.ManagementRequest)))
+	case req.Method == http.MethodPost && path == base+"/login/cancel":
+		return okEnvelope(mgmtJSONResponse(http.StatusOK, handlePanelLoginCancel(req.ManagementRequest)))
 	case req.Method == http.MethodPost && path == base+"/trial":
 		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleClaimTrialWithCallback(req.ManagementRequest, req.HostCallbackID)))
 	case req.Method == http.MethodPost && path == base+"/select":
@@ -372,7 +388,10 @@ func mutatingManagementPath(path string) bool {
 		base + "/import",
 		base + "/trial",
 		base + "/select",
-		base + "/keepalive":
+		base + "/keepalive",
+		base + "/login/start",
+		base + "/login/status",
+		base + "/login/cancel":
 		return true
 	}
 	return false

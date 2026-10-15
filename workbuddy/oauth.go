@@ -103,43 +103,104 @@ func doJSONRequest(client *http.Client, req *http.Request) (json.RawMessage, int
 	return env.Data, resp.StatusCode, nil
 }
 
+// oauthRequestProfile is the per-service request shape for the CodeBuddy login
+// and refresh endpoints. Each service has its own host, User-Agent and header
+// conventions; mixing them yields 403/401 upstream.
 type oauthRequestProfile struct {
-	mode      string
-	stateURL  string
-	userAgent string
-	origin    string
+	mode       string
+	service    wbService
+	stateURL   string
+	tokenURL   string // full URL; the state is appended by the caller
+	accountURL string // full URL; the state is appended by the caller
+	refreshURL string // full URL of the token-refresh endpoint
+	userAgent  string
+	origin     string
+	// anonymous sends the X-No-* headers that unauthenticated endpoints use to
+	// suppress server-side session lookups.
+	anonymous bool
+	// refreshSource is the X-Auth-Refresh-Source value for token refresh.
+	refreshSource string
 }
 
+// oauthProfileForMode keeps the historical CN-only signature: it resolves the
+// CLI or WorkBuddy desktop request shape for the CN service.
 func oauthProfileForMode(mode string) oauthRequestProfile {
+	return oauthProfileForService(serviceCN, mode)
+}
+
+// oauthProfileForService builds the login/refresh request shape for one
+// service. mode selects the CN client profile (cli or workbuddy desktop) and is
+// ignored for the international services, which each have a single client.
+func oauthProfileForService(service wbService, mode string) oauthRequestProfile {
+	switch service {
+	case serviceCodeBuddyGlobal:
+		return oauthRequestProfile{
+			mode:          oauthClientModeCLI,
+			service:       serviceCodeBuddyGlobal,
+			stateURL:      upstreamBaseCodeBuddyGlobal + "/v2/plugin/auth/state?platform=ide",
+			tokenURL:      upstreamBaseCodeBuddyGlobal + "/v2/plugin/auth/token",
+			accountURL:    upstreamBaseCodeBuddyGlobal + "/v2/plugin/login/account",
+			refreshURL:    upstreamBaseCodeBuddyGlobal + "/v2/plugin/auth/token/refresh",
+			userAgent:     codeBuddyBrowserUA,
+			origin:        originRefererCodeBuddyGlobal,
+			anonymous:     true,
+			refreshSource: "ide-main",
+		}
+	case serviceWorkBuddyGlobal:
+		return oauthRequestProfile{
+			mode:          oauthClientModeCLI,
+			service:       serviceWorkBuddyGlobal,
+			stateURL:      upstreamBaseGlobal + "/v2/plugin/auth/state?platform=ide",
+			tokenURL:      upstreamBaseGlobal + "/v2/plugin/auth/token",
+			accountURL:    upstreamBaseGlobal + "/v2/plugin/login/account",
+			refreshURL:    upstreamBaseGlobal + "/v2/plugin/auth/token/refresh",
+			userAgent:     codeBuddyBrowserUA,
+			origin:        originRefererGlobal,
+			anonymous:     true,
+			refreshSource: "ide-main",
+		}
+	}
 	if mode == oauthClientModeWorkBuddy {
 		return oauthRequestProfile{
-			mode:      oauthClientModeWorkBuddy,
-			stateURL:  upstreamBaseCN + "/v2/plugin/auth/state?platform=workbuddy",
-			userAgent: "WorkBuddy/5.3.14 WorkBuddy/5.3.14 CLI/2.115.0",
-			origin:    "https://www.workbuddy.cn",
+			mode:          oauthClientModeWorkBuddy,
+			service:       serviceCN,
+			stateURL:      upstreamBaseCN + "/v2/plugin/auth/state?platform=workbuddy",
+			tokenURL:      upstreamBaseCN + "/v2/plugin/auth/token",
+			accountURL:    upstreamBaseCN + "/v2/plugin/login/account",
+			refreshURL:    upstreamBaseCN + "/v2/plugin/auth/token/refresh",
+			userAgent:     "WorkBuddy/5.3.14 WorkBuddy/5.3.14 CLI/2.115.0",
+			origin:        "https://www.workbuddy.cn",
+			anonymous:     true,
+			refreshSource: "plugin",
 		}
 	}
 	return oauthRequestProfile{
-		mode:      oauthClientModeCLI,
-		stateURL:  endpointAuthState,
-		userAgent: clientUA,
-		origin:    originReferer,
+		mode:          oauthClientModeCLI,
+		service:       serviceCN,
+		stateURL:      endpointAuthState,
+		tokenURL:      endpointAuthToken,
+		accountURL:    endpointLoginAcct,
+		refreshURL:    endpointTokenRefresh,
+		userAgent:     clientUA,
+		origin:        originReferer,
+		refreshSource: "plugin",
 	}
 }
 
 func applyOAuthProfileHeaders(req *http.Request, profile oauthRequestProfile) {
 	commonHeaders(req)
-	if profile.mode != oauthClientModeWorkBuddy {
-		return
+	if profile.userAgent != "" {
+		req.Header.Set("User-Agent", profile.userAgent)
 	}
-	req.Header.Set("User-Agent", profile.userAgent)
-	req.Header.Set("Origin", profile.origin)
-	req.Header.Set("Referer", profile.origin+"/")
+	if profile.origin != "" {
+		req.Header.Set("Origin", profile.origin)
+		req.Header.Set("Referer", profile.origin+"/")
+	}
 }
 
 func applyAnonymousOAuthHeaders(req *http.Request, profile oauthRequestProfile) {
 	applyOAuthProfileHeaders(req, profile)
-	if profile.mode != oauthClientModeWorkBuddy {
+	if !profile.anonymous {
 		return
 	}
 	req.Header.Set("X-No-Authorization", "true")
@@ -158,7 +219,11 @@ func buildAuthStateRequest(profile oauthRequestProfile) (*http.Request, error) {
 }
 
 func buildAuthTokenRequest(profile oauthRequestProfile, state string) (*http.Request, error) {
-	req, err := http.NewRequest(http.MethodGet, endpointAuthToken+state, nil)
+	base := profile.tokenURL
+	if base == "" {
+		base = endpointAuthToken
+	}
+	req, err := http.NewRequest(http.MethodGet, base+"?state="+state, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -167,13 +232,17 @@ func buildAuthTokenRequest(profile oauthRequestProfile, state string) (*http.Req
 }
 
 func buildLoginAccountRequest(profile oauthRequestProfile, state, accessToken string) (*http.Request, error) {
-	req, err := http.NewRequest(http.MethodGet, endpointLoginAcct+state, nil)
+	base := profile.accountURL
+	if base == "" {
+		base = endpointLoginAcct
+	}
+	req, err := http.NewRequest(http.MethodGet, base+"?state="+state, nil)
 	if err != nil {
 		return nil, err
 	}
 	applyOAuthProfileHeaders(req, profile)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	if profile.mode == oauthClientModeWorkBuddy {
+	if profile.mode == oauthClientModeWorkBuddy || profile.service != serviceCN {
 		req.Header.Set("X-No-User-Id", "true")
 		req.Header.Set("X-No-Enterprise-Id", "true")
 		req.Header.Set("X-No-Department-Info", "true")
@@ -181,12 +250,22 @@ func buildLoginAccountRequest(profile oauthRequestProfile, state, accessToken st
 	return req, nil
 }
 
+// buildTokenRefreshRequest builds the refresh call for one profile. The
+// international services authenticate the refresh with the access token and an
+// X-Domain hint (matching their desktop client); CN keeps the historical shape.
 func buildTokenRefreshRequest(profile oauthRequestProfile, sa *storedAuth) (*http.Request, error) {
-	req, err := http.NewRequest(http.MethodPost, endpointTokenRefreshFor(sa), nil)
+	url := profile.refreshURL
+	if url == "" {
+		url = endpointTokenRefreshFor(sa)
+	}
+	req, err := http.NewRequest(http.MethodPost, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	applyOAuthProfileHeaders(req, profile)
+	if profile.service != serviceCN && sa.Auth.AccessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+sa.Auth.AccessToken)
+	}
 	if profile.mode == oauthClientModeWorkBuddy {
 		req.Header.Set("X-No-Authorization", "true")
 		req.Header.Set("X-No-User-Id", "true")
@@ -199,7 +278,14 @@ func buildTokenRefreshRequest(profile oauthRequestProfile, sa *storedAuth) (*htt
 	if sa.Account.EnterpriseID != "" {
 		req.Header.Set("X-Enterprise-Id", sa.Account.EnterpriseID)
 	}
-	req.Header.Set("X-Auth-Refresh-Source", "plugin")
+	if profile.service != serviceCN {
+		req.Header.Set("X-Domain", refreshDomainFor(sa))
+	}
+	source := profile.refreshSource
+	if source == "" {
+		source = "plugin"
+	}
+	req.Header.Set("X-Auth-Refresh-Source", source)
 	return req, nil
 }
 
@@ -388,8 +474,14 @@ func handleRefreshAuth(raw []byte) ([]byte, error) {
 	if tok.RefreshToken != "" {
 		sa.Auth.RefreshToken = tok.RefreshToken
 	}
-	if tok.Domain != "" {
-		sa.Auth.Domain = tok.Domain
+	// The upstream domain is authoritative only when it agrees with the
+	// credential's service. Accepting a cross-service value here would silently
+	// re-route the account (and, for CodeBuddy international, change its file
+	// identity) on the first refresh.
+	if d := strings.TrimSpace(tok.Domain); d != "" {
+		if serviceFromDomain(d) == serviceFor(sa) {
+			sa.Auth.Domain = d
+		}
 	}
 	sa.Auth.ExpiresAt = expiryFromExpiresIn(tok.ExpiresIn, sa.Auth.ExpiresAt)
 	// No explicit host.auth.save here: the host's auth Manager persists the
@@ -411,12 +503,19 @@ func buildLoginStoredAuth(tok tokenData, acct accountData) (*storedAuth, error) 
 	if strings.TrimSpace(acct.UID) == "" {
 		return nil, fmt.Errorf("account lookup missing uid")
 	}
+	// The host-driven card is CN-only. A token response without a domain would
+	// otherwise store an account whose service is undecidable, and the CN
+	// default is what every pre-existing credential resolves to.
+	domain := strings.TrimSpace(tok.Domain)
+	if domain == "" {
+		domain = domainForService(serviceCN)
+	}
 	return &storedAuth{
 		Auth: storedTokens{
 			AccessToken:  tok.AccessToken,
 			RefreshToken: tok.RefreshToken,
 			ExpiresAt:    expiryFromExpiresIn(tok.ExpiresIn, 0),
-			Domain:       tok.Domain,
+			Domain:       domain,
 		},
 		Account: storedAccount{
 			UID:          acct.UID,

@@ -12,6 +12,11 @@ built-in management dashboard.
 
 - **OAuth login** — multi-account `workbuddy-<uid>.json` auth files via the
   host's auth store. CN and Global realms share one plugin, one config block.
+- **Two-region add-account** — the panel dialog offers 国内版 (CodeBuddy CN) and
+  国际版 (CodeBuddy international, `www.codebuddy.ai`), and both can be used at
+  once. An account's region comes from its credential domain (`cn`,
+  `codebuddy-global`, `workbuddy-global`); routing, refresh and model catalogs are
+  isolated per region with no cross-region fallback.
 - **Model catalog**: by default the plugin discovers and caches each
   authenticated account's model entitlements. An optional authoritative YAML
   list can replace WorkBuddy discovery. Both modes enrich missing metadata from
@@ -21,15 +26,20 @@ built-in management dashboard.
   via `host.stream.emit`) and non-streaming (SSE folded into a single
   completion). `tool_choice` normalization, Claude Code template sanitization,
   and per-realm system-message injection are built in.
-- **Credit lifecycle** — CN accounts auto-`disabled` when credits run out and
-  re-enabled when a check-in restores them. Global accounts are deleted on
-  exhaustion (one-shot trial quota). Hard credit errors from the executor
-  trigger an immediate reconcile.
-- **Daily check-in** — CN accounts are checked in at 09:00 and 21:00 local
-  time (configurable). Manual "check in all" from the panel. Per-account
-  mutex prevents duplicate claims from racing browser tabs.
-- **Trial claim** — Global accounts can claim the one-time 250-credit expert
-  trial pack from the panel.
+- **Credit lifecycle** — an exhausted account is auto-`disabled` and its
+  credential kept, then re-enabled once credits recover. A credential is deleted
+  only when its service is confirmed to have no check-in activity, making its
+  quota a one-shot trial. Unknown capability or unknown credits never delete.
+  Hard credit errors from the executor trigger an immediate reconcile.
+- **Daily check-in (capability-based)** — the plugin probes each account's
+  service for a check-in activity and reports `supported` / `unsupported` /
+  `unknown`. Only accounts with an activity are offered 签到 and checked in
+  automatically at 09:00 and 21:00 local time (configurable); others show
+  "unsupported", and an inconclusive probe still allows a manual attempt.
+  Per-account mutexes prevent duplicate claims from racing browser tabs.
+- **Trial claim** — legacy WorkBuddy-international accounts can claim the
+  one-time 250-credit expert trial pack from the panel. CodeBuddy international
+  does not offer this button.
 - **Dashboard** — embedded panel at `/v0/resource/plugins/workbuddy/panel`
   with credits progress bars, plan badges, exhausted/disabled flags, region
   filter, and credential import.
@@ -73,9 +83,21 @@ plugins:
 ### 3. Sign in
 
 Open the WorkBuddy panel from CPA's sidebar (or hit
-`/v0/resource/plugins/workbuddy/panel` directly) and click **登录** to start
-the OAuth flow. Repeat for each account you want to add — the plugin writes
-one `workbuddy-<uid>.json` per account to the auth store.
+`/v0/resource/plugins/workbuddy/panel` directly) and click **添加账号**, then pick
+a region and finish the authorization:
+
+- **国内版 (codebuddy.cn)** signs in through the CodeBuddy CN gateway.
+- **国际版 (codebuddy.ai)** signs in to CodeBuddy international.
+
+The panel only receives a session id and the authorization URL; tokens are
+exchanged and persisted backend-side and never rendered in the page. Closing or
+restarting the dialog cancels the previous session, and a late response from a
+superseded session cannot override the current login. CN and international
+credentials use distinct file names (`workbuddy-<uid>.json` and
+`workbuddy-codebuddy-global-<uid>.json`), so the same UID can exist on both
+services.
+
+CPA's own auth card still works; it starts CN logins only.
 
 ### 4. Use it
 

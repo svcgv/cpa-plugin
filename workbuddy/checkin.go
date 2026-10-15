@@ -130,27 +130,20 @@ func processAutoCheckinAccount(f pluginapi.HostAuthFileEntry, doCheckin bool) {
 		if err != nil {
 			return
 		}
-		if isGlobalDomain(sa.Auth.Domain) {
-			// Global: never check-in or auto-claim trial. Lifecycle only.
-			// Invalidate cache (copy entry, set credits=nil, keep plan/checkin).
-			if v, ok := accountCache.Load(f.ID); ok {
-				if e, ok2 := v.(*accountCacheEntry); ok2 {
-					fresh := *e
-					fresh.credits = nil
-					fresh.fetched = time.Now()
-					accountCache.Store(f.ID, &fresh)
-				}
-			}
-			if lifecycleEnabled() {
-				_, _ = reconcileOneAccount(f.AuthIndex, f.ID, true)
-			}
-			return
-		}
 		withCheckinLock(f.AuthIndex, func() {
-			// CN: daily check-in when enabled.
-			ci, err := fetchCheckinStatus(sa)
-			if err == nil && ci != nil && ci.Active && !ci.TodayCheckedIn {
-				if _, callErr := performCheckinCall(sa); callErr == nil {
+			// Auto check-in is opt-in per account: only an account that
+			// positively reported a running activity is claimed. Unsupported
+			// accounts are skipped, and an inconclusive probe is never used to
+			// justify a write against a real account on a timer.
+			probe := checkinCapabilityProbe(sa, "")
+			if probe.Summary != nil {
+				probe.Summary.Capability = string(probe.Capability)
+				probe.Summary.CapabilityNote = probe.Message
+			}
+			ci := probe.Summary
+			if probe.Capability == capabilitySupported && ci != nil && !ci.TodayCheckedIn {
+				res, callErr := performCheckinCall(sa)
+				if callErr == nil && res["success"] == true {
 					// Refresh once after a successful checkin call so cache reflects
 					// the post-call state. If the status call fails keep the pre-call
 					// snapshot rather than dropping it (v0.6.31: avoid shadowing ci
@@ -253,6 +246,7 @@ func handleManualCheckinWithCallback(req pluginapi.ManagementRequest, callbackID
 	// Summary counters (field names are a panel contract — panel.html
 	// checkinAll reads success/already/fail/skipped_global/eligible).
 	successN, failN, alreadyN, globalN, eligibleN := 0, 0, 0, 0, 0
+	unsupportedN, unknownN := 0, 0
 	for _, out := range results {
 		if out == nil {
 			continue
@@ -266,7 +260,17 @@ func handleManualCheckinWithCallback(req pluginapi.ManagementRequest, callbackID
 		case "already":
 			alreadyN++
 			continue
+		case "unsupported":
+			// The account has no daily check-in activity. Counting this as a
+			// failure would make "全部签到" look broken for an international
+			// account that simply has nothing to claim.
+			unsupportedN++
+			continue
+		case "unknown":
+			unknownN++
+			continue
 		case "global":
+			// Legacy reason kept for results produced by older flows.
 			globalN++
 			continue
 		}
@@ -284,6 +288,8 @@ func handleManualCheckinWithCallback(req pluginapi.ManagementRequest, callbackID
 			"eligible":       eligibleN,
 			"success":        successN,
 			"already":        alreadyN,
+			"unsupported":    unsupportedN,
+			"unknown":        unknownN,
 			"skipped_global": globalN,
 			"fail":           failN,
 			"attempted":      eligibleN,
@@ -304,23 +310,19 @@ func checkinOneAccount(f pluginapi.HostAuthFileEntry) map[string]any {
 	return checkinOneAccountWithCallback(f, "")
 }
 
+// checkinHostAuthGet fetches one credential for the check-in path. Overridable
+// so tests can drive the full decision path without a host bridge.
+var checkinHostAuthGet = hostAuthGet
+
 func checkinOneAccountWithCallback(f pluginapi.HostAuthFileEntry, callbackID string) map[string]any {
 	out := map[string]any{"auth_index": f.AuthIndex}
 
-	sa, err := hostAuthGet(f.AuthIndex)
+	sa, err := checkinHostAuthGet(f.AuthIndex)
 	if err != nil {
 		out["error"] = err.Error()
 		return out
 	}
 	out["nickname"] = sa.Account.Nickname
-
-	if isGlobalDomain(sa.Auth.Domain) {
-		out["success"] = false
-		out["skipped"] = true
-		out["reason"] = "global"
-		out["message"] = "国际版账号不支持签到，请使用领取专家加油包"
-		return out
-	}
 
 	mu := checkinLockFor(f.AuthIndex)
 	mu.Lock()
@@ -328,14 +330,44 @@ func checkinOneAccountWithCallback(f pluginapi.HostAuthFileEntry, callbackID str
 
 	// Status probe: a failure here is NOT fatal — the check-in call below is
 	// idempotent upstream and its business message tells us "already" anyway.
-	ci, ciErr := fetchCheckinStatusWithCallback(sa, callbackID)
-	if ciErr == nil && ci != nil && ci.TodayCheckedIn {
-		mergeCheckinCache(f.ID, ci)
-		out["success"] = true
+	probe := checkinCapabilityProbe(sa, callbackID)
+	if probe.Summary != nil {
+		probe.Summary.Capability = string(probe.Capability)
+		probe.Summary.CapabilityNote = probe.Message
+	}
+	switch probe.Capability {
+	case capabilityUnsupported:
+		// Every candidate endpoint answered and none exposes an activity for
+		// this account. Do not call daily-checkin: it would only produce a
+		// confusing upstream error.
+		mergeCheckinCache(f.ID, &checkinSummary{
+			Capability:     string(capabilityUnsupported),
+			CapabilityNote: probe.Message,
+		})
+		out["success"] = false
 		out["skipped"] = true
-		out["reason"] = "already"
-		out["message"] = "already checked in today"
+		out["reason"] = "unsupported"
+		out["message"] = probe.Message
 		return out
+	case capabilityUnknown:
+		// Auth / transport / rate-limit failure. The upstream check-in call is
+		// idempotent and still reports "already" itself, so attempt it rather
+		// than blocking the user on a probe hiccup.
+		if probe.Summary != nil {
+			mergeCheckinCache(f.ID, probe.Summary)
+		}
+	default:
+		if probe.Summary != nil && probe.Summary.TodayCheckedIn {
+			mergeCheckinCache(f.ID, probe.Summary)
+			out["success"] = true
+			out["skipped"] = true
+			out["reason"] = "already"
+			out["message"] = "already checked in today"
+			return out
+		}
+		if probe.Summary != nil {
+			mergeCheckinCache(f.ID, probe.Summary)
+		}
 	}
 
 	res, err := performCheckinCallWithCallback(sa, callbackID)
@@ -358,6 +390,14 @@ func checkinOneAccountWithCallback(f pluginapi.HostAuthFileEntry, callbackID str
 	}
 	if _, ok := out["success"]; !ok {
 		out["success"] = true
+	}
+	// An explicit upstream failure is a real failure: leave the account's
+	// checked-in state untouched instead of implying new credits.
+	if out["success"] != true {
+		if out["message"] == nil {
+			out["message"] = "签到未成功"
+		}
+		return out
 	}
 
 	// Post-call cache refresh: one extra status fetch at most; on failure

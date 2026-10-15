@@ -26,7 +26,9 @@ type wbAccount struct {
 	Label        string          `json:"label"`
 	Nickname     string          `json:"nickname"`
 	UID          string          `json:"uid"`
-	Region       string          `json:"region"` // "cn" or "global"
+	Region       string          `json:"region"`  // "cn" or "global"
+	Service      string          `json:"service"` // cn | codebuddy-global | workbuddy-global
+	Capability   string          `json:"checkin_capability,omitempty"`
 	Plan         string          `json:"plan"`
 	Status       string          `json:"status"`
 	Disabled     bool            `json:"disabled"`
@@ -188,13 +190,18 @@ func buildDashboardExWithCallback(force, fetchCredits bool, callbackID string) m
 			acct.Nickname = sa.Account.Nickname
 			acct.UID = sa.Account.UID
 			acct.Region = accountRegion(sa)
+			acct.Service = string(serviceFor(sa))
+			// The expert trial pack is a WorkBuddy-international one-shot. Only
+			// that service has evidence for it, so the button is not offered for
+			// CodeBuddy international.
+			supportsTrial := serviceFor(sa) == serviceWorkBuddyGlobal
 			if fetchCredits {
 				plan, ci, cr, errs := cachedAccountDetailsWithCallback(f.ID, sa, force, callbackID)
 				acct.Plan = plan
 				acct.Checkin = ci
 				acct.Credits = cr
 				acct.Exhausted = isCreditsExhausted(cr)
-				if isGlobalDomain(sa.Auth.Domain) {
+				if supportsTrial {
 					acct.TrialClaimed = hasTrialPack(cr)
 				}
 				// Keep note in sync (throttled); do not block dashboard on save errors.
@@ -208,12 +215,13 @@ func buildDashboardExWithCallback(force, fetchCredits bool, callbackID string) m
 						acct.Checkin = e.checkin
 						acct.Credits = e.credits
 						acct.Exhausted = isCreditsExhausted(e.credits)
-						if isGlobalDomain(sa.Auth.Domain) {
+						if supportsTrial {
 							acct.TrialClaimed = hasTrialPack(e.credits)
 						}
 					}
 				}
 			}
+			acct.Capability = string(checkinCapabilityFromSummary(acct.Checkin))
 			out[i] = acct
 		}(i, f)
 	}

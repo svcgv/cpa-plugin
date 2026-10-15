@@ -89,6 +89,9 @@ const (
 	clientUA            = "CLI/2.63.2 CodeBuddy/2.63.2"
 	originReferer       = "https://www.codebuddy.cn"
 	originRefererGlobal = "https://www.workbuddy.ai"
+	// codeBuddyBrowserUA is required by the CodeBuddy gateways: a request
+	// without a browser User-Agent is rejected with HTTP 403 / code 10085.
+	codeBuddyBrowserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
 
 	// CN endpoint aliases (login / chat). upstreamBaseCN is the only
 	// CN base; Global has its own upstreamBaseGlobal. No "upstreamBase" legacy
@@ -337,7 +340,7 @@ type registrationCapability struct {
 }
 
 // version is injected at build time via -ldflags "-X main.version=...".
-var version = "0.9.3"
+var version = "0.10.0"
 
 func wbRegistration() registration {
 	return registration{
@@ -349,13 +352,13 @@ func wbRegistration() registration {
 			GitHubRepository: "https://github.com/Sliverkiss/cpa-plugin",
 			Logo:             pluginLogoURL,
 			ConfigFields: []pluginapi.ConfigField{
-				{Name: "checkin_auto", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Enable daily auto check-in at 09:00 and 21:00 local time for CN accounts (default true)."},
-				{Name: "lifecycle_auto", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Auto disable CN / delete Global when credits exhausted; re-enable CN after check-in restores credits (default true)."},
+				{Name: "checkin_auto", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Enable daily auto check-in at 09:00 and 21:00 local time for accounts whose service exposes a check-in activity (default true). Accounts without one are skipped."},
+				{Name: "lifecycle_auto", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Auto disable accounts whose credits are exhausted, and re-enable them once credits recover. Credentials are deleted only when the account's service has no check-in activity to recover from (default true)."},
 				{Name: "token_keepalive", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Enable daily access-token refresh at 22:00 local time to prevent Keycloak offline-session expiry (default true)."},
 				{Name: "desensitize", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Insert U+200B into configured blocked terms in system/developer prompt text and tool title/description fields (default false)."},
 				{Name: "desensitize_terms", Type: pluginapi.ConfigFieldTypeArray, Description: "Editable literal term list for desensitize; missing uses the built-in 85 terms and [] means an empty custom list."},
 				{Name: "models", Type: pluginapi.ConfigFieldTypeArray, Description: "Optional model IDs, single-line strings only. A non-empty list is the complete catalog and bypasses WorkBuddy catalog HTTP and cache; models.dev metadata fetch and cache still apply. Missing, null, or [] keeps dynamic WorkBuddy discovery."},
-				{Name: "oauth_client_mode", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{oauthClientModeCLI, oauthClientModeWorkBuddy}, Description: "OAuth request profile: cli (default) or explicit WorkBuddy desktop profile."},
+				{Name: "oauth_client_mode", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{oauthClientModeCLI, oauthClientModeWorkBuddy}, Description: "OAuth request profile for the host auth card (CN only): cli (default) or explicit WorkBuddy desktop profile. International accounts are added from the plugin panel, which selects the region per login."},
 				{Name: "enterprise_credits", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Probe strict CN enterprise credits before personal resource packages (default false; Global unchanged)."},
 				{Name: "management_key", Type: pluginapi.ConfigFieldTypeString, Description: "Optional Bearer key enforced by WorkBuddy for mutating management endpoints; also env WB_MANAGEMENT_KEY."},
 				{Name: "proxy-url", Type: pluginapi.ConfigFieldTypeString, Description: "Optional plugin-level proxy for all WorkBuddy HTTP traffic. Supports http, https, socks5, and socks5h; empty preserves existing routing and host-bridged calls inherit CPA. Invalid settings fail closed. Explicit proxy traffic bypasses CPA request-log."},
@@ -503,26 +506,6 @@ func commonHeaders(req *http.Request) {
 	req.Header.Set("Origin", originReferer)
 	req.Header.Set("Referer", originReferer+"/")
 	req.Header.Set("User-Agent", clientUA)
-}
-
-// originRefererFor returns the Origin/Referer base URL appropriate for the
-// account's domain. Global accounts use https://www.workbuddy.ai; CN (and
-// legacy auth files with empty domain) use the default https://www.codebuddy.cn.
-func originRefererFor(sa *storedAuth) string {
-	if sa != nil && isGlobalDomain(sa.Auth.Domain) {
-		return originRefererGlobal
-	}
-	return originReferer
-}
-
-// upstreamBaseFor returns the chat/auth API host for the account realm.
-// Global JWT iss is workbuddy.ai — those tokens only work on www.workbuddy.ai.
-// CN tokens work on copilot.tencent.com. Mixing them yields APISIX 401.
-func upstreamBaseFor(sa *storedAuth) string {
-	if sa != nil && isGlobalDomain(sa.Auth.Domain) {
-		return upstreamBaseGlobal
-	}
-	return upstreamBaseCN
 }
 
 func endpointChatFor(sa *storedAuth) string {

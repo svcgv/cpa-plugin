@@ -113,20 +113,41 @@ func isSoftRateLimit(status int, body string) bool {
 		strings.Contains(lower, "throttl")
 }
 
-// lifecycleActionFor chooses disable/delete/none from region + credits.
-// Does not consider reenable (that needs disabled flag).
-func lifecycleActionFor(region string, cr *creditsSummary) lifecycleAction {
+// lifecycleActionForService chooses the exhausted-credit action for one account.
+//
+// CN accounts are always disabled: a check-in restores their credits, so the
+// credential stays useful. International accounts are deleted only when the
+// account is known to have no daily check-in activity, which makes its quota a
+// one-shot trial. When that capability is unknown, the credential is disabled
+// and kept: the cost of waiting one more cycle is far lower than deleting a
+// credential the user must re-authorize.
+func lifecycleActionForService(service wbService, capability checkinCapability, cr *creditsSummary) lifecycleAction {
 	if !shouldActOnCredits(cr) {
 		return lifecycleNone
 	}
-	if region == "global" {
+	if service == serviceCN {
+		return lifecycleDisable
+	}
+	if capability == capabilityUnsupported {
 		return lifecycleDelete
 	}
 	return lifecycleDisable
 }
 
-// shouldReenableCN is true when a CN account is disabled but now has credits.
-func shouldReenableCN(disabled bool, cr *creditsSummary) bool {
+// checkinCapabilityFromSummary reads the capability verdict recorded on a
+// check-in snapshot. A missing snapshot or verdict is unknown, never
+// "unsupported".
+func checkinCapabilityFromSummary(ci *checkinSummary) checkinCapability {
+	if ci == nil || ci.Capability == "" {
+		return capabilityUnknown
+	}
+	return checkinCapability(ci.Capability)
+}
+
+// shouldReenable reports whether a disabled account now has usable credits
+// again. Applies to every service: accounts are disabled (not deleted) once
+// their quota can be restored, so the re-enable path must cover them too.
+func shouldReenable(disabled bool, cr *creditsSummary) bool {
 	if !disabled {
 		return false
 	}
@@ -142,12 +163,7 @@ func shouldReenableCN(disabled bool, cr *creditsSummary) bool {
 
 // displayNote builds a one-line note for CPAMP Auth cards.
 func displayNote(sa *storedAuth, cr *creditsSummary, disabled bool) string {
-	region := strings.ToUpper(accountRegion(sa))
-	if region == "CN" {
-		region = "CN"
-	} else {
-		region = "Global"
-	}
+	region := serviceFor(sa).label()
 	parts := []string{region}
 	if disabled {
 		parts = append(parts, "已禁用")
@@ -179,9 +195,5 @@ func labelForAuth(sa *storedAuth) string {
 	if sa != nil && strings.TrimSpace(sa.Account.Nickname) != "" {
 		base = strings.TrimSpace(sa.Account.Nickname)
 	}
-	tag := "CN"
-	if accountRegion(sa) == "global" {
-		tag = "Global"
-	}
-	return base + " [" + tag + "]"
+	return base + " [" + serviceFor(sa).label() + "]"
 }

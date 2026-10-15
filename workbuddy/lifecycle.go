@@ -117,7 +117,7 @@ func reenableAuth(authIndex, authID string, sa *storedAuth, cr *creditsSummary) 
 	mu.Lock()
 	defer mu.Unlock()
 
-	if !shouldReenableCN(true, cr) {
+	if !shouldReenable(true, cr) {
 		return nil
 	}
 	note := displayNote(sa, cr, false)
@@ -222,12 +222,14 @@ func peerAuthDir() string {
 	return ""
 }
 
-// applyExhaustedPolicy applies disable (CN) or delete (Global).
+// applyExhaustedPolicy applies the exhausted-credit action for one account:
+// disable when the quota can recover, delete only for an international account
+// with no daily check-in activity to recover from.
 func applyExhaustedPolicy(authIndex, authID string, sa *storedAuth, cr *creditsSummary, reason string) error {
 	if !lifecycleEnabled() {
 		return nil
 	}
-	action := lifecycleActionFor(accountRegion(sa), cr)
+	action := lifecycleActionForService(serviceFor(sa), capabilityFor(authID), cr)
 	switch action {
 	case lifecycleDelete:
 		return deleteAuth(authIndex, authID, sa)
@@ -333,9 +335,9 @@ func reconcileOneAccountWithCallback(authIndex, authID string, force bool, callb
 		}
 	}
 
-	region := accountRegion(sa)
-	if region == "cn" && disabled {
-		if shouldReenableCN(true, cr) {
+	capability := capabilityFor(authID)
+	if disabled {
+		if shouldReenable(true, cr) {
 			if err := reenableAuth(authIndex, authID, sa, cr); err != nil {
 				return lifecycleReenable, err
 			}
@@ -346,12 +348,12 @@ func reconcileOneAccountWithCallback(authIndex, authID string, force bool, callb
 		return lifecycleNone, nil
 	}
 
-	act := lifecycleActionFor(region, cr)
+	act := lifecycleActionForService(serviceFor(sa), capability, cr)
 	switch act {
 	case lifecycleDelete:
-		// P1-4: confirm before deleting a Global account — a transient 402
-		// from the upstream billing API could otherwise cause an irreversible
-		// delete. Re-fetch credits once more; only proceed if still exhausted.
+		// P1-4: confirm before deleting an account — a transient 402 from the
+		// upstream billing API could otherwise cause an irreversible delete.
+		// Re-fetch credits once more; only proceed if still exhausted.
 		cr2, err2 := fetchUserResourceWithCallback(sa, callbackID)
 		if err2 != nil || !isCreditsExhausted(cr2) {
 			// Credits may have recovered (or fetch failed) — don't delete.
@@ -558,4 +560,18 @@ func enrichAuthMetadata(sa *storedAuth, cr *creditsSummary, disabled bool) map[s
 		"note":     note,
 		"disabled": disabled,
 	}
+}
+
+// capabilityFor reads the cached check-in capability verdict for one account.
+// A miss means "unknown", which keeps the credential instead of deleting it.
+func capabilityFor(authID string) checkinCapability {
+	v, ok := accountCache.Load(authID)
+	if !ok {
+		return capabilityUnknown
+	}
+	e, ok := v.(*accountCacheEntry)
+	if !ok || e == nil {
+		return capabilityUnknown
+	}
+	return checkinCapabilityFromSummary(e.checkin)
 }

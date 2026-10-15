@@ -125,8 +125,8 @@ func handleClaimTrialWithCallback(req pluginapi.ManagementRequest, callbackID st
 		if err != nil {
 			return map[string]any{"auth_index": authIndex, "error": err.Error()}
 		}
-		if !isGlobalDomain(sa.Auth.Domain) {
-			return map[string]any{"auth_index": authIndex, "error": "专家加油包仅适用于国际版账号"}
+		if serviceFor(sa) != serviceWorkBuddyGlobal {
+			return map[string]any{"auth_index": authIndex, "error": "专家加油包仅适用于旧版 WorkBuddy 国际账号"}
 		}
 		res, err := performTrialCallWithCallback(sa, callbackID)
 		out := map[string]any{"auth_index": authIndex, "nickname": sa.Account.Nickname}
@@ -185,6 +185,7 @@ func handleSelectAuth(req pluginapi.ManagementRequest) map[string]any {
 			"ok":          true,
 			"active_auth": f.ID,
 			"region":      accountRegion(sa),
+			"service":     string(serviceFor(sa)),
 			"nickname":    sa.Account.Nickname,
 			"uid":         sa.Account.UID,
 		}
@@ -222,45 +223,33 @@ func handleCreditsQueryWithCallback(req pluginapi.ManagementRequest, callbackID 
 					"auth_index": authIndex, "error": "load auth: " + err.Error(),
 				}}}
 			}
-			cr, err := fetchUserResourceWithCallback(sa, callbackID)
+			// One combined refresh: credits, plan and the check-in capability
+			// verdict that the panel uses to decide whether 签到 is offered.
+			plan, ci, cr, errs := cachedAccountDetailsWithCallback(f.ID, sa, true, callbackID)
 			acct := map[string]any{
 				"auth_index": authIndex,
 				"nickname":   sa.Account.Nickname,
 				"uid":        sa.Account.UID,
 				"region":     accountRegion(sa),
+				"service":    string(serviceFor(sa)),
 				"name":       f.Name,
 				"label":      f.Label,
 				"disabled":   f.Disabled,
 				"selected":   getActiveAuthID() == f.ID,
 			}
-			if err != nil {
-				acct["error"] = err.Error()
-			} else {
+			acct["checkin_capability"] = string(checkinCapabilityFromSummary(ci))
+			if len(errs) > 0 {
+				acct["error"] = strings.Join(errs, "; ")
+			}
+			if cr != nil {
 				acct["credits"] = cr
 				acct["exhausted"] = isCreditsExhausted(cr)
-				if isGlobalDomain(sa.Auth.Domain) {
+				if serviceFor(sa) == serviceWorkBuddyGlobal {
 					acct["trial_claimed"] = hasTrialPack(cr)
 				}
-				// Also fetch plan so the badge updates on lazy load.
-				acct["plan"] = fetchPaymentTypeWithCallback(sa, callbackID)
-				// Update cache so subsequent dashboard loads see fresh data.
-				now := time.Now()
-				if cr != nil {
-					cr.FetchedAt = now.UTC().Format(time.RFC3339)
-				}
-				// Merge into existing cache entry (keep checkin if present).
-				var prev *accountCacheEntry
-				if v, ok := accountCache.Load(f.ID); ok {
-					prev, _ = v.(*accountCacheEntry)
-				}
-				var ci *checkinSummary
-				if prev != nil {
-					ci = prev.checkin
-				}
-				plan, _ := acct["plan"].(string)
-				accountCache.Store(f.ID, &accountCacheEntry{
-					checkin: ci, credits: cr, plan: plan, fetched: now,
-				})
+			}
+			if plan != "" {
+				acct["plan"] = plan
 			}
 			return map[string]any{"accounts": []map[string]any{acct}}
 		}

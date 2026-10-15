@@ -60,7 +60,24 @@ type workBuddyRealm string
 const (
 	workBuddyRealmCN     workBuddyRealm = "cn"
 	workBuddyRealmGlobal workBuddyRealm = "global"
+	// workBuddyRealmCodeBuddyGlobal is the CodeBuddy international service. It
+	// is distinct from workBuddyRealmGlobal (the legacy WorkBuddy
+	// international service) because the two have different hosts and must not
+	// share a cached model catalog even for the same UID.
+	workBuddyRealmCodeBuddyGlobal workBuddyRealm = "codebuddy-global"
 )
+
+// realmForService maps a credential service onto its model-catalog realm.
+func realmForService(service wbService) workBuddyRealm {
+	switch service {
+	case serviceCodeBuddyGlobal:
+		return workBuddyRealmCodeBuddyGlobal
+	case serviceWorkBuddyGlobal:
+		return workBuddyRealmGlobal
+	default:
+		return workBuddyRealmCN
+	}
+}
 
 type workBuddyEndpointKind string
 
@@ -210,17 +227,28 @@ func fetchWorkBuddyCatalog(sa *storedAuth, callbackID string, do modelHTTPDo) (w
 	if sa == nil {
 		return workBuddyCatalog{}, &modelSourceError{Kind: modelSourceSchemaFailure, err: fmt.Errorf("stored auth is nil")}
 	}
-	realm, err := workBuddyRealmFromAccessToken(sa.Auth.AccessToken)
+	// The credential domain is authoritative for which service to talk to; the
+	// JWT issuer is a routing fact that must agree with it. A disagreement means
+	// the stored credential would be sent to the wrong realm, which upstream
+	// answers with 401, so fail loudly instead of guessing.
+	service := serviceFor(sa)
+	realm := realmForService(service)
+	tokenRealm, err := workBuddyRealmFromAccessToken(sa.Auth.AccessToken)
 	if err != nil {
+		// The catalog endpoints are realm-routed and need a decodable issuer;
+		// without one there is no safe host to call.
 		return workBuddyCatalog{}, &modelSourceError{Kind: modelSourceSchemaFailure, err: err}
 	}
-
-	base := upstreamBaseCN
-	origin := originReferer
-	if realm == workBuddyRealmGlobal {
-		base = upstreamBaseGlobal
-		origin = originRefererGlobal
+	if tokenRealm != realm {
+		return workBuddyCatalog{}, &modelSourceError{
+			Kind: modelSourceSchemaFailure,
+			err: fmt.Errorf("credential domain service %q does not match the access-token issuer realm %q",
+				service, tokenRealm),
+		}
 	}
+
+	base := upstreamBaseFor(sa)
+	origin := originRefererFor(sa)
 	ctx, cancel := context.WithTimeout(context.Background(), modelSourceRequestTimeout)
 	defer cancel()
 
@@ -295,9 +323,20 @@ func workBuddyRealmFromAccessToken(accessToken string) (workBuddyRealm, error) {
 	switch strings.ToLower(issuer.Hostname()) {
 	case "codebuddy.cn", "www.codebuddy.cn", "copilot.tencent.com":
 		return workBuddyRealmCN, nil
-	case "workbuddy.ai":
+	case "codebuddy.ai", "www.codebuddy.ai":
+		return workBuddyRealmCodeBuddyGlobal, nil
+	case "workbuddy.ai", "www.workbuddy.ai":
 		return workBuddyRealmGlobal, nil
 	default:
 		return "", fmt.Errorf("JWT issuer host is unsupported")
 	}
+}
+
+// valid reports whether the realm is one this plugin can serve.
+func (r workBuddyRealm) valid() bool {
+	switch r {
+	case workBuddyRealmCN, workBuddyRealmGlobal, workBuddyRealmCodeBuddyGlobal:
+		return true
+	}
+	return false
 }

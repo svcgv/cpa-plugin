@@ -10,20 +10,28 @@
 
 - **OAuth 登录** — 通过宿主 auth store 管理多账号 `workbuddy-<uid>.json`，
   CN 和 Global 共用一个插件、一份配置。
+- **双区域添加账号** — 面板「添加账号」可选国内版或国际版：国内版走现有
+  CodeBuddy CN 网关，国际版登录 CodeBuddy 国际（`www.codebuddy.ai`）。两区可同时使用。
+  区域由凭证 domain 决定（`cn` / `codebuddy-global` / `workbuddy-global`），
+  路由、刷新与模型目录按区域隔离，不会跨区回退。
 - **模型目录**：默认按已认证账号发现并缓存可用模型，也可以用 YAML 中的完整
   列表替代 WorkBuddy discovery。两种模式都会用 models.dev 补充缺失的 metadata。
   宿主侧 `oauth-model-alias` / `oauth-excluded-models` 配置仍然生效。
 - **执行器** — OpenAI 兼容 chat completions，流式（真 SSE，走 `host.stream.emit`）
   和非流式（SSE 折叠成单个 completion）都支持。内置 `tool_choice` 归一、
   Claude Code 模板清洗、按区域注入 system message。
-- **积分生命周期** — CN 账号耗尽自动 `disabled`，签到回血后自动恢复；
-  Global 账号耗尽**删除** auth 文件（一次性 trial 额度）。Executor 遇到硬
-  积分错误立即触发 reconcile。
-- **每日签到** — CN 账号每天 09:00 和 21:00 自动签到（可配置）。面板可手动
-  全部签到。Per-account 互斥锁防止多浏览器标签并发重复签到。
-- **Trial 领取** — Global 账号可在面板领取一次性 250 积分专家加油包。
+- **积分生命周期** — 账号耗尽时自动 `disabled` 并保留凭证，积分恢复后自动启用；
+  只有确认所在服务**没有**签到活动（即额度为一次性 trial）的账号才会删除 auth 文件。
+  能力或积分未知时不会删除。Executor 遇到硬积分错误立即触发 reconcile。
+- **每日签到（按能力）** — 插件先探测账号所在服务的签到活动，标记为
+  `supported` / `unsupported` / `unknown`。仅有活动的账号显示「签到」并在
+  09:00 / 21:00 自动签到；没有活动显示「不支持签到」；查询失败显示「状态未知」
+  但仍可手动尝试。CN 与外服账号都适用。
+- **Trial 领取** — 旧 WorkBuddy 国际版账号可在面板领取一次性 250 积分专家加油包。
+  CodeBuddy 国际版不显示该按钮。
 - **积分面板** — 内嵌面板 `/v0/resource/plugins/workbuddy/panel`，含积分
-  进度条、套餐徽章、耗尽/禁用标记、CN/Global 筛选、凭证导入。
+  进度条、套餐徽章、耗尽/禁用标记、CN/Global 筛选、凭证导入，以及按服务标注的
+  `CN` / `Global(CB)` / `Global(WB)` 徽章与按能力的签到按钮。
 - **调度器**（可选） — `scheduler_mode: credits` 让插件选中面板选中的账号；
   `off`（默认）完全交给 CPA 内置调度。
 - **Usage 上报** — 实现 `UsagePlugin` 能力，每条请求的 usage record 转发到
@@ -62,8 +70,17 @@ plugins:
 ### 3. 登录
 
 从 CPA 侧边栏打开 WorkBuddy 面板（或直接访问
-`/v0/resource/plugins/workbuddy/panel`），点 **登录** 走 OAuth 流程。
-每个账号登录一次，插件会把 `workbuddy-<uid>.json` 写入 auth store。
+`/v0/resource/plugins/workbuddy/panel`），点 **添加账号**，选择区域后完成授权：
+
+- **国内版（codebuddy.cn）** 走现有 CodeBuddy CN 网关。
+- **国际版（codebuddy.ai）** 登录 CodeBuddy 国际服务。
+
+面板只接收会话 ID 和授权链接，令牌在后端交换并写入 auth store，不会回显到页面。
+关闭弹窗或重新发起会取消上一个会话；旧会话的迟到响应不会覆盖当前登录。
+每个账号登录一次，CN 与国际文件分别为 `workbuddy-<uid>.json` 与
+`workbuddy-codebuddy-global-<uid>.json`，因此同一 UID 在两个服务上可以并存。
+
+CPA 自带 Auth 卡片仍可用，它只发起 CN 登录。
 
 ### 4. 调用
 
@@ -193,13 +210,16 @@ custom model source。新进程启动或 auth、token、plugin config generation
 
 ## 生命周期
 
-| 状态 | CN 账号 | Global 账号 |
+| 状态 | 有签到活动的账号 | 无签到活动（一次性 trial） |
 |---|---|---|
 | 积分 > 0 | active | active |
-| 积分 = 0 | `disabled: true`（auth 文件保留） | auth 文件**删除** |
-| 签到回血 | 自动恢复 | n/a（已删） |
-| Trial 可领 | n/a | 每账号一次 |
-| 积分未知 | 不动（永不误杀） | 不动 |
+| 积分 = 0 | `disabled: true`（凭证保留） | auth 文件**删除** |
+| 积分回血 | 自动恢复启用 | n/a（已删） |
+| Trial 可领 | n/a | 仅旧 WorkBuddy 国际版，每账号一次 |
+| 能力或积分未知 | 不动（永不误杀） | 不动 |
+
+判断依据是该账号所在服务的签到活动：CN 账号始终保留；国际版只有确认没有
+签到活动时才删除。
 
 Executor 遇到硬积分错误（402、"insufficient credits"、"积分不足" 等）
 会立即触发该账号的 reconcile。

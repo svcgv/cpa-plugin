@@ -1,5 +1,60 @@
 # Changelog
 
+## 0.10.0
+
+### Dual-region accounts: CN, CodeBuddy international, WorkBuddy international
+
+- Add a panel **添加账号** dialog with a 国内版 / 国际版 selector. CN signs in through
+  the existing CodeBuddy CN gateway; 国际版 signs in to CodeBuddy international
+  (`www.codebuddy.ai`, `platform=ide`). Both regions can be used at the same time.
+- Model each account as belonging to one of three services — `cn`,
+  `codebuddy-global` and `workbuddy-global` — resolved from the stored credential
+  domain. Routing (chat, refresh, billing, model catalog, expiry) is per service,
+  and a JWT issuer that disagrees with the credential domain is rejected instead
+  of silently retargeted.
+- Keep credentials separate per service. CodeBuddy-international accounts use the
+  `workbuddy-codebuddy-global-<uid>.json` name so the same UID can exist on both
+  services; existing files keep their names and host identity.
+- Give CodeBuddy international its own model-catalog cache and realm, so a catalog
+  is never shared with the CN or legacy WorkBuddy service.
+
+### Panel login sessions
+
+- Add `POST /plugins/workbuddy/login/start|status|cancel`. The browser only
+  receives a session id and the authorization URL; tokens are exchanged and
+  persisted backend-side and never returned to the panel.
+- Closing or restarting the dialog cancels the previous session, and a response
+  from a superseded session cannot overwrite the current one.
+- Fix the refresh/keepalive path to build its request from the credential's own
+  service rather than the configured CN client mode, which previously sent
+  international refresh tokens to the CN gateway.
+
+### Check-in capability
+
+- Probe an account's check-in activity before offering 签到 and report
+  `supported` / `unsupported` / `unknown`. An account with no activity shows
+  不支持签到 instead of failing; `unknown` still allows a manual attempt.
+- Fall back from `checkin-activity-status` to the legacy `checkin-status` only
+  when the first endpoint is genuinely absent. Auth, rate-limit, transport and
+  malformed-body failures stay `unknown`.
+- Preserve an explicit upstream `success: false`. A rejected check-in is no
+  longer rewritten as a success or used to mark the account as checked in.
+- Automatic check-in now claims only accounts that positively reported a running
+  activity, and batch results separate 成功 / 已签 / 不支持 / 失败.
+
+### Credit lifecycle
+
+- Disable an exhausted account and keep the credential; re-enable it once credits
+  recover. Credentials are deleted only when the account's service is confirmed
+  to have no daily check-in activity, making its quota a one-shot trial.
+- Unknown capabilities and unknown credits never trigger a delete.
+
+### Panel
+
+- Cards show the service (`CN` / `Global(CB)` / `Global(WB)`), the check-in
+  state, and action buttons that match the account's actual capability. The
+  expert trial pack is offered only for legacy WorkBuddy-international accounts.
+
 ## 0.9.3
 
 ### Dynamic model bootstrap

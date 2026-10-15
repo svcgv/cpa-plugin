@@ -80,35 +80,38 @@ func TestLifecycleActionFor(t *testing.T) {
 	ex := &creditsSummary{TotalRemain: 0, TotalUsed: 5}
 	ok := &creditsSummary{TotalRemain: 10, TotalUsed: 1}
 	cases := []struct {
-		name   string
-		region string
-		cr     *creditsSummary
-		want   lifecycleAction
+		name       string
+		service    wbService
+		capability checkinCapability
+		cr         *creditsSummary
+		want       lifecycleAction
 	}{
-		{"cn exhausted", "cn", ex, lifecycleDisable},
-		{"global exhausted", "global", ex, lifecycleDelete},
-		{"cn ok", "cn", ok, lifecycleNone},
-		{"global ok", "global", ok, lifecycleNone},
-		{"unknown", "cn", nil, lifecycleNone},
+		{"cn exhausted", serviceCN, capabilitySupported, ex, lifecycleDisable},
+		{"codebuddy global exhausted without activity", serviceCodeBuddyGlobal, capabilityUnsupported, ex, lifecycleDelete},
+		{"codebuddy global exhausted with activity", serviceCodeBuddyGlobal, capabilitySupported, ex, lifecycleDisable},
+		{"workbuddy global exhausted without activity", serviceWorkBuddyGlobal, capabilityUnsupported, ex, lifecycleDelete},
+		{"cn ok", serviceCN, capabilitySupported, ok, lifecycleNone},
+		{"global ok", serviceCodeBuddyGlobal, capabilitySupported, ok, lifecycleNone},
+		{"unknown credits", serviceCN, capabilitySupported, nil, lifecycleNone},
 	}
 	for _, tc := range cases {
-		if got := lifecycleActionFor(tc.region, tc.cr); got != tc.want {
+		if got := lifecycleActionForService(tc.service, tc.capability, tc.cr); got != tc.want {
 			t.Fatalf("%s: got %v want %v", tc.name, got, tc.want)
 		}
 	}
 }
 
-func TestShouldReenableCN(t *testing.T) {
-	if shouldReenableCN(false, &creditsSummary{TotalRemain: 10}) {
+func TestShouldReenable(t *testing.T) {
+	if shouldReenable(false, &creditsSummary{TotalRemain: 10}) {
 		t.Fatal("enabled account should not reenable")
 	}
-	if shouldReenableCN(true, nil) {
+	if shouldReenable(true, nil) {
 		t.Fatal("unknown credits must not reenable")
 	}
-	if shouldReenableCN(true, &creditsSummary{TotalRemain: 0, TotalUsed: 5}) {
+	if shouldReenable(true, &creditsSummary{TotalRemain: 0, TotalUsed: 5}) {
 		t.Fatal("exhausted must not reenable")
 	}
-	if !shouldReenableCN(true, &creditsSummary{TotalRemain: 3}) {
+	if !shouldReenable(true, &creditsSummary{TotalRemain: 3}) {
 		t.Fatal("disabled + remain should reenable")
 	}
 }
@@ -313,11 +316,11 @@ func TestDeleteAuthFileInDir(t *testing.T) {
 func TestLifecycleActionFor_IdempotentPolicy(t *testing.T) {
 	// Applying action twice with same inputs must stay disable/delete (not flip).
 	ex := &creditsSummary{TotalRemain: 0, TotalUsed: 1}
-	if lifecycleActionFor("cn", ex) != lifecycleDisable {
+	if lifecycleActionForService(serviceCN, capabilitySupported, ex) != lifecycleDisable {
 		t.Fatal("cn")
 	}
-	if lifecycleActionFor("global", ex) != lifecycleDelete {
-		t.Fatal("global")
+	if lifecycleActionForService(serviceCodeBuddyGlobal, capabilityUnsupported, ex) != lifecycleDelete {
+		t.Fatal("global without activity")
 	}
 	// Soft rate limit body never hard-credit alone.
 	if isHardCreditError(429, "too many requests") {

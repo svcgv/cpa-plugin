@@ -26,48 +26,6 @@ func acquireUserResourceSlot() func() {
 	return func() { <-userResourceSlots }
 }
 
-// isGlobalDomain reports whether the domain belongs to the international
-// (www.workbuddy.ai) WorkBuddy service.  The CN service uses
-// www.codebuddy.cn; Global uses www.workbuddy.ai.
-func isGlobalDomain(domain string) bool {
-	d := strings.ToLower(strings.TrimSpace(domain))
-	return d == "workbuddy.ai" || strings.HasSuffix(d, ".workbuddy.ai")
-}
-
-// accountRegion returns "cn" or "global" based on the auth's domain field.
-// Empty domain (legacy auth files) defaults to "cn" for backward compat.
-func accountRegion(sa *storedAuth) string {
-	if sa != nil && isGlobalDomain(sa.Auth.Domain) {
-		return "global"
-	}
-	return "cn"
-}
-
-// setBillingBase temporarily overrides billingBase for tests; returns a
-// restore func.
-func setBillingBase(s string) func() {
-	old := billingBase
-	billingBase = s
-	return func() { billingBase = old }
-}
-
-// setBillingBaseGlobal temporarily overrides billingBaseGlobal for tests.
-func setBillingBaseGlobal(s string) func() {
-	old := billingBaseGlobal
-	billingBaseGlobal = s
-	return func() { billingBaseGlobal = old }
-}
-
-// billingBaseFor returns the billing API base URL for the given auth's domain.
-// CN accounts → https://www.codebuddy.cn; Global → https://www.workbuddy.ai.
-// Falls back to the test-overridable billingBase for CN/nil.
-func billingBaseFor(sa *storedAuth) string {
-	if sa != nil && isGlobalDomain(sa.Auth.Domain) {
-		return billingBaseGlobal
-	}
-	return billingBase
-}
-
 // -----------------------------------------------------------------------------
 // Billing / check-in API calls
 // -----------------------------------------------------------------------------
@@ -148,6 +106,21 @@ func billingCallOnceWithCallback(sa *storedAuth, path string, body any, callback
 		}
 		return nil, fmt.Errorf("http %d from %s: %s", resp.StatusCode, path, snippet)
 	}
+	// A 4xx body is often HTML or a bare status page rather than the usual
+	// {code,msg,data} envelope. Surface the HTTP status in that case so callers
+	// can distinguish "this endpoint does not exist" from "the response body is
+	// unreadable" — the callers that probe for optional endpoints depend on it.
+	if resp.StatusCode >= 400 {
+		var errEnv apiEnvelope
+		if err := json.Unmarshal(raw, &errEnv); err == nil && errEnv.Code != 0 {
+			return nil, fmt.Errorf("code=%d msg=%s", errEnv.Code, truncateRedacted(errEnv.Msg, 120))
+		}
+		snippet := strings.TrimSpace(redactSecrets(string(raw)))
+		if len(snippet) > 120 {
+			snippet = snippet[:120]
+		}
+		return nil, fmt.Errorf("http %d from %s: %s", resp.StatusCode, path, snippet)
+	}
 	var env apiEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {
 		// parse failed usually means upstream returned a non-JSON error page
@@ -171,50 +144,28 @@ func fetchCheckinStatus(sa *storedAuth) (*checkinSummary, error) {
 	return fetchCheckinStatusWithCallback(sa, "")
 }
 
+// fetchCheckinStatusWithCallback probes the account's check-in activity. Shared
+// with the capability probe so the panel and the scheduler always agree on
+// whether an account can check in.
 func fetchCheckinStatusWithCallback(sa *storedAuth, callbackID string) (*checkinSummary, error) {
-	var data json.RawMessage
-	var lastErr error
-	for _, path := range []string{"/v2/billing/meter/checkin-activity-status", "/v2/billing/meter/checkin-status"} {
-		d, err := billingCallWithCallback(sa, path, nil, callbackID)
-		if err == nil {
-			data = d
-			lastErr = nil
-			break
+	probe := checkinCapabilityProbe(sa, callbackID)
+	if probe.Summary != nil {
+		probe.Summary.Capability = string(probe.Capability)
+		probe.Summary.CapabilityNote = probe.Message
+		return probe.Summary, nil
+	}
+	if probe.Capability == capabilityUnknown {
+		if probe.Message == "" {
+			probe.Message = "签到状态未知"
 		}
-		lastErr = err
+		return nil, fmt.Errorf("%s", probe.Message)
 	}
-	if lastErr != nil {
-		return nil, lastErr
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, err
-	}
-	sum := &checkinSummary{
-		Active:          jsonBool(m, "active", "Active"),
-		TodayCheckedIn:  jsonBool(m, "today_checked_in", "todayCheckedIn"),
-		StreakDays:      jsonI64(m, "streak_days", "streakDays"),
-		DailyCredit:     jsonI64(m, "daily_credit", "dailyCredit"),
-		TodayCredit:     jsonI64(m, "today_credit", "todayCredit"),
-		TotalCredits:    jsonI64(m, "total_credits", "totalCredits"),
-		WeekCheckinDays: jsonI64(m, "week_checkin_days", "weekCheckinDays"),
-		ActivityName:    jsonStr(m, "activity_name", "activityName"),
-		Season:          jsonI64(m, "season", "season"),
-	}
-	if dates, ok := m["checkin_dates"].([]any); ok {
-		for _, d := range dates {
-			if s, ok := d.(string); ok {
-				sum.CheckinDates = append(sum.CheckinDates, s)
-			}
-		}
-	} else if dates, ok := m["checkinDates"].([]any); ok {
-		for _, d := range dates {
-			if s, ok := d.(string); ok {
-				sum.CheckinDates = append(sum.CheckinDates, s)
-			}
-		}
-	}
-	return sum, nil
+	// Supported or unsupported, but no parsed summary: hand back the verdict so
+	// the caller can still render a capability badge.
+	return &checkinSummary{
+		Capability:     string(probe.Capability),
+		CapabilityNote: probe.Message,
+	}, nil
 }
 
 // packageRemainUsed picks current-cycle remain/used/size for one package.
@@ -561,10 +512,15 @@ func performCheckinCallWithCallback(sa *storedAuth, callbackID string) (map[stri
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, err
 	}
-	// Explicitly set success as bool — upstream may return "true" (string)
-	// which would cause downstream `out["success"] == true` to fail silently
-	// (P1-2 logic bug: type mismatch on success field).
-	m["success"] = true
+	// Normalize `success` to a real bool, but never overwrite an explicit
+	// upstream false: a business-level rejection must not be reported as a
+	// successful check-in. Upstream may send "true"/"false" as strings, and a
+	// missing field means the call itself succeeded.
+	if v, ok := m["success"]; ok {
+		m["success"] = truthy(v)
+	} else {
+		m["success"] = true
+	}
 	return m, nil
 }
 

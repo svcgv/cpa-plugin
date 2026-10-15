@@ -73,11 +73,14 @@ func refreshCall(sa *storedAuth) (json.RawMessage, []byte, int, error) {
 }
 
 func refreshCallWithCallback(sa *storedAuth, callbackID string) (json.RawMessage, []byte, int, error) {
+	// The refresh endpoint is per service: a CN credential must not be sent to
+	// the international host (and vice versa). The configured client mode only
+	// applies to CN, so resolve the profile from the credential's own service.
 	mode := oauthClientModeCLI
 	if features := currentFeatureRuntime(); features != nil {
 		mode = features.oauthClientMode
 	}
-	req, err := buildTokenRefreshRequest(oauthProfileForMode(mode), sa)
+	req, err := buildTokenRefreshRequest(oauthProfileForService(serviceFor(sa), mode), sa)
 	if err != nil {
 		return nil, nil, 0, err
 	}

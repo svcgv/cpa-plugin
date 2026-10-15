@@ -456,3 +456,162 @@ test("partial import all failure keeps modal open and sanitizes long names", asy
   assert.equal(modal.classList.contains("show"), true);
   assert.equal(toastDetail, "0 成功 / 1 失败 · " + "x".repeat(120) + "：导入失败");
 });
+
+// ---------------------------------------------------------------------------
+// Add-account dialog and capability-aware cards.
+// ---------------------------------------------------------------------------
+
+test("card offers check-in only when the account capability allows it", () => {
+  const { context } = loadPanel();
+  const base = {
+    auth_index: "idx-1",
+    nickname: "Nick",
+    region: "global",
+    name: "workbuddy-codebuddy-global-uid-1.json",
+  };
+
+  const unsupported = context.card(Object.assign({}, base, {
+    checkin_capability: "unsupported",
+    checkin: { capability: "unsupported", capability_note: "该账号没有每日签到活动" },
+  }));
+  assert.match(unsupported, /不支持签到/);
+  assert.doesNotMatch(unsupported, /data-action="checkin"/);
+
+  const unknown = context.card(Object.assign({}, base, { checkin_capability: "unknown" }));
+  assert.match(unknown, /data-action="checkin"/);
+  assert.match(unknown, /签到\?/);
+
+  const supported = context.card(Object.assign({}, base, {
+    checkin_capability: "supported",
+    checkin: { today_checked_in: false },
+  }));
+  assert.match(supported, /data-action="checkin"/);
+  assert.doesNotMatch(supported, /签到\?/);
+
+  const already = context.card(Object.assign({}, base, {
+    checkin_capability: "supported",
+    checkin: { today_checked_in: true },
+  }));
+  assert.match(already, /已签到/);
+  assert.match(already, /disabled/);
+});
+
+test("only the legacy workbuddy-global service offers the expert trial pack", () => {
+  const { context } = loadPanel();
+  const base = { auth_index: "idx-1", nickname: "Nick", region: "global" };
+
+  const codebuddy = context.card(Object.assign({}, base, {
+    service: "codebuddy-global",
+    checkin_capability: "supported",
+  }));
+  assert.doesNotMatch(codebuddy, /data-action="claim"/);
+
+  const workbuddy = context.card(Object.assign({}, base, {
+    service: "workbuddy-global",
+    checkin_capability: "supported",
+  }));
+  assert.match(workbuddy, /data-action="claim"/);
+
+  const claimed = context.card(Object.assign({}, base, {
+    service: "workbuddy-global",
+    trial_claimed: true,
+    checkin_capability: "supported",
+  }));
+  assert.doesNotMatch(claimed, /data-action="claim"/);
+  assert.match(claimed, /已领取/);
+});
+
+test("cards label the three services distinctly", () => {
+  const { context } = loadPanel();
+  for (const [service, region, want] of [
+    ["cn", "cn", "CN"],
+    ["codebuddy-global", "global", "Global(CB)"],
+    ["workbuddy-global", "global", "Global(WB)"],
+  ]) {
+    const html = context.card({ auth_index: "i", region, service, checkin_capability: "supported" });
+    assert.ok(html.indexOf(want) >= 0, "expected " + want + " in card for " + service);
+  }
+});
+
+test("starting an add-account login posts the selected region", async () => {
+  const calls = [];
+  const { context, elements } = loadPanel({
+    sessionEntries: [["workbuddy-mgmt-key", "k"]],
+    fetch: async (url, opts) => {
+      calls.push({ url, body: opts && opts.body });
+      return fakeResponse(200, "application/json", JSON.stringify({
+        success: true, session_id: "s-1", url: "https://example.test/login", region: "global",
+      }));
+    },
+  });
+  context.openAddModal();
+  const radio = { value: "global", checked: true };
+  context.document.querySelector = (sel) => (sel.indexOf("addRegion") >= 0 ? radio : null);
+
+  await context.startAddLogin(elements.get("addStartBtn") || { disabled: false, dataset: {}, classList: { add() {}, remove() {} } });
+
+  const start = calls.find(c => String(c.url).indexOf("/login/start") >= 0);
+  assert.ok(start, "expected a /login/start call");
+  assert.equal(JSON.parse(start.body).region, "global");
+  // The authorization URL is shown so the user can copy it if the popup is blocked.
+  assert.ok((elements.get("addBody").innerHTML || "").indexOf("https://example.test/login") >= 0);
+});
+
+test("closing the dialog cancels the in-flight login session", async () => {
+  const calls = [];
+  const { context } = loadPanel({
+    sessionEntries: [["workbuddy-mgmt-key", "k"]],
+    fetch: async (url, opts) => {
+      calls.push({ url, body: opts && opts.body });
+      if (String(url).indexOf("/login/start") >= 0) {
+        return fakeResponse(200, "application/json", JSON.stringify({
+          success: true, session_id: "s-42", url: "https://example.test/login",
+        }));
+      }
+      return fakeResponse(200, "application/json", JSON.stringify({ success: true, cancelled: true }));
+    },
+  });
+  context.openAddModal();
+  context.document.querySelector = () => ({ value: "cn", checked: true });
+  await context.startAddLogin({ disabled: false, dataset: {}, classList: { add() {}, remove() {} } });
+
+  context.closeAddModal();
+  // The cancel request is dispatched asynchronously.
+  await new Promise(resolve => setImmediate(resolve));
+  const cancel = calls.find(c => String(c.url).indexOf("/login/cancel") >= 0);
+  assert.ok(cancel, "expected a /login/cancel call");
+  assert.equal(JSON.parse(cancel.body).session_id, "s-42");
+});
+
+test("a late poll result cannot revive a superseded attempt", async () => {
+  let released = null;
+  const { context } = loadPanel({
+    sessionEntries: [["workbuddy-mgmt-key", "k"]],
+    fetch: async (url) => {
+      if (String(url).indexOf("/login/status") >= 0) {
+        // Hold the response until the test releases it.
+        await new Promise(resolve => { released = resolve; });
+        return fakeResponse(200, "application/json", JSON.stringify({
+          status: "success", nickname: "Stale",
+        }));
+      }
+      return fakeResponse(200, "application/json", JSON.stringify({
+        success: true, session_id: "s-old", url: "https://example.test/login",
+      }));
+    },
+  });
+  context.openAddModal();
+  context.document.querySelector = () => ({ value: "cn", checked: true });
+  await context.startAddLogin({ disabled: false, dataset: {}, classList: { add() {}, remove() {} } });
+
+  // Supersede the flow before the held poll resolves.
+  assert.ok(released, "expected the poll to be in flight");
+  context.resetAddState();
+  released();
+  await new Promise(resolve => setImmediate(resolve));
+
+  // The superseded session must not be treated as the active one: no success
+  // state may be rendered for it.
+  const body = context.document.getElementById("addBody");
+  assert.ok(!/登录成功/.test(body.innerHTML || ""), "stale poll rendered a success state");
+});

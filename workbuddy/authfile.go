@@ -34,12 +34,54 @@ func sanitizeUIDForFileName(uid string) string {
 }
 
 func authFileNameFor(sa *storedAuth) string {
+	return authFileNameForService(sa, serviceFor(sa))
+}
+
+// codeBuddyGlobalFilePrefix names CodeBuddy-international auth files. The same
+// UID can legitimately exist on the CN and the international service, so those
+// credentials must not share a file.
+const codeBuddyGlobalFilePrefix = "workbuddy-codebuddy-global-"
+
+// authFileNameForService returns the canonical auth file name for a credential
+// on one service.
+//
+// CN and the legacy WorkBuddy-international service keep the historical
+// "workbuddy-<uid>.json" name so existing files retain their identity. Only
+// CodeBuddy international uses a distinct prefix.
+func authFileNameForService(sa *storedAuth, service wbService) string {
 	if sa != nil {
 		if uid := sanitizeUIDForFileName(sa.Account.UID); uid != "" {
+			if service == serviceCodeBuddyGlobal {
+				return codeBuddyGlobalFilePrefix + uid + ".json"
+			}
 			return "workbuddy-" + uid + ".json"
 		}
 	}
 	return authFileName
+}
+
+// persistServiceLoginAuth writes a freshly authorized credential to the host
+// auth store. Success here is what makes a panel login "complete": the caller
+// must not report success before the file is on disk, or the account would
+// disappear on the next dashboard reload.
+func persistServiceLoginAuth(sa *storedAuth, service wbService) error {
+	if sa == nil {
+		return fmt.Errorf("nil storedAuth")
+	}
+	raw, err := buildAuthFileJSON(sa, false, displayNote(sa, nil, false), nil)
+	if err != nil {
+		return err
+	}
+	name := authFileNameForService(sa, service)
+	if err := hostAuthPersist(name, "", raw); err != nil {
+		return err
+	}
+	// A UID that previously existed under the plain CN name on this service
+	// would otherwise linger as a duplicate row.
+	if service == serviceCodeBuddyGlobal {
+		removeSupersededGlobalAuthFile(sa)
+	}
+	return nil
 }
 
 // isLegacyWorkbuddyAuthName reports the historical single-file name that collides
@@ -326,3 +368,43 @@ func deleteAuthFileInDir(path, dir string) error {
 }
 
 // hostAuthGetFull returns physical JSON, path, and name for an auth index.
+
+// removeSupersededGlobalAuthFile deletes a plain "workbuddy-<uid>.json" file
+// that holds the same UID as a freshly written CodeBuddy-international
+// credential. Without this, a service migration would leave two rows for one
+// account. The delete is skipped whenever the existing file's stored domain
+// still resolves to a different service, or matches nothing.
+func removeSupersededGlobalAuthFile(sa *storedAuth) {
+	if sa == nil || sa.Account.UID == "" {
+		return
+	}
+	files, err := hostAuthList()
+	if err != nil {
+		return
+	}
+	want := sanitizeUIDForFileName(sa.Account.UID)
+	if want == "" {
+		return
+	}
+	plain := "workbuddy-" + want + ".json"
+	for _, f := range files {
+		if !strings.EqualFold(f.Name, plain) {
+			continue
+		}
+		phys, err := hostAuthGetPhysical(f.AuthIndex)
+		if err != nil {
+			continue
+		}
+		existing, err := parseStored(phys.JSON)
+		if err != nil || existing == nil {
+			continue
+		}
+		if serviceFor(existing) != serviceCodeBuddyGlobal {
+			// Still a CN / legacy WorkBuddy-international credential.
+			continue
+		}
+		dir := filepath.Dir(phys.Path)
+		_ = deleteAuthFileInDir(phys.Path, dir)
+		return
+	}
+}

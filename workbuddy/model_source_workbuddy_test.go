@@ -243,6 +243,7 @@ func TestFetchWorkBuddyCatalogRoutesByJWTRealm(t *testing.T) {
 	}{
 		{realm: workBuddyRealmCN, base: upstreamBaseCN, origin: originReferer},
 		{realm: workBuddyRealmGlobal, base: upstreamBaseGlobal, origin: originRefererGlobal},
+		{realm: workBuddyRealmCodeBuddyGlobal, base: upstreamBaseCodeBuddyGlobal, origin: originRefererCodeBuddyGlobal},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.realm), func(t *testing.T) {
@@ -313,6 +314,7 @@ func TestFetchWorkBuddyCatalogLegacyRequestPreservesRealmRouting(t *testing.T) {
 	}{
 		{realm: workBuddyRealmCN, base: upstreamBaseCN, origin: originReferer},
 		{realm: workBuddyRealmGlobal, base: upstreamBaseGlobal, origin: originRefererGlobal},
+		{realm: workBuddyRealmCodeBuddyGlobal, base: upstreamBaseCodeBuddyGlobal, origin: originRefererCodeBuddyGlobal},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.realm), func(t *testing.T) {
@@ -467,9 +469,13 @@ func syntheticStoredAuth(t *testing.T, realm workBuddyRealm) *storedAuth {
 	t.Helper()
 	issuer := "https://codebuddy.cn/realms/cli"
 	domain := "codebuddy.cn"
-	if realm == workBuddyRealmGlobal {
+	switch realm {
+	case workBuddyRealmGlobal:
 		issuer = "https://workbuddy.ai/realms/cli"
 		domain = "workbuddy.ai"
+	case workBuddyRealmCodeBuddyGlobal:
+		issuer = "https://codebuddy.ai/realms/cli"
+		domain = "codebuddy.ai"
 	}
 	return &storedAuth{
 		Auth:    storedTokens{AccessToken: syntheticAccessToken(t, issuer), Domain: domain},
