@@ -473,7 +473,8 @@ type storedTokens struct {
 	RefreshToken  string `json:"refreshToken"`        // jrt- (48h) or drt- (~1y)
 	PersonalToken string `json:"personalToken"`       // pt-..., long-lived fallback
 	ExpiresAt     int64  `json:"expiresAt"`           // active-token expiry (unix seconds)
-	Domain        string `json:"domain"`              // realm: qoder.com.cn
+	Domain        string `json:"domain"`              // realm: qoder.com.cn | qoder.sh
+	Region        string `json:"region,omitempty"`    // "cn" | "intl" (authoritative realm marker)
 	MachineID     string `json:"machineId,omitempty"` // device-auth machine id used for COSY headers
 }
 
@@ -517,6 +518,7 @@ func parseStored(raw []byte) (*storedAuth, error) {
 			PersonalToken string `json:"personalToken"` // PAT fallback — must survive the flat shape too
 			ExpiresAt     int64  `json:"expiresAt"`
 			Domain        string `json:"domain"`
+			Region        string `json:"region"`
 			MachineID     string `json:"machineId"`
 			UID           string `json:"uid"`
 			EnterpriseID  string `json:"enterpriseId"`
@@ -525,7 +527,7 @@ func parseStored(raw []byte) (*storedAuth, error) {
 		if err := json.Unmarshal(raw, &flat); err != nil {
 			return nil, fmt.Errorf("storage_parse_error: %w", err)
 		}
-		sa.Auth = storedTokens{AccessToken: flat.AccessToken, RefreshToken: flat.RefreshToken, PersonalToken: flat.PersonalToken, ExpiresAt: flat.ExpiresAt, Domain: flat.Domain, MachineID: flat.MachineID}
+		sa.Auth = storedTokens{AccessToken: flat.AccessToken, RefreshToken: flat.RefreshToken, PersonalToken: flat.PersonalToken, ExpiresAt: flat.ExpiresAt, Domain: flat.Domain, Region: flat.Region, MachineID: flat.MachineID}
 		sa.Account = storedAccount{UID: flat.UID, EnterpriseID: flat.EnterpriseID, Nickname: flat.Nickname}
 	}
 	if sa.Auth.AccessToken == "" {
@@ -671,13 +673,17 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 		return nil, err
 	}
 	// Map CPA-facing model name (e.g. "qoder/qmodel_preview" or "qmodel_preview")
-	// to the upstream key the gateway recognises.
-	upstreamModel := cpaToUpstreamKey(stripProviderPrefix(req.Model))
+	// to the upstream key the gateway recognises. The two realms use different
+	// model namespaces, so the mapping is region-specific.
 	started := time.Now()
 	authUID := ""
 	if sa.Account.UID != "" {
 		authUID = sa.Account.UID
 	}
+	if sa.region() == regionIntl {
+		return executeIntl(req, sa, intlUpstreamModel(stripProviderPrefix(req.Model)), started, authUID)
+	}
+	upstreamModel := cpaToUpstreamKey(stripProviderPrefix(req.Model))
 	// Build the QoderWork agent_chat_generation body from the OpenAI request,
 	// then QoderEncoding-encode it. The template embeds a 10657-token system
 	// prompt that the server requires for normal behaviour (KNOWLEDGE §5.2).
@@ -751,12 +757,17 @@ func handleExecStream(raw []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	upstreamModel := cpaToUpstreamKey(stripProviderPrefix(req.Model))
 	started := time.Now()
 	authUID := ""
 	if sa.Account.UID != "" {
 		authUID = sa.Account.UID
 	}
+
+	// International realm: OpenAI-compatible passthrough (no COSY, no template).
+	if sa.region() == regionIntl {
+		return handleExecStreamIntl(req, sa, started, authUID)
+	}
+	upstreamModel := cpaToUpstreamKey(stripProviderPrefix(req.Model))
 
 	// Build the QoderWork body (template-based) and QoderEncoding-encode.
 	bodyRaw := req.Payload

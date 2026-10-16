@@ -88,7 +88,6 @@ func handleCheckinConfig(req pluginapi.ManagementRequest) map[string]any {
 }
 
 // handleSelectAuth sets the panel-selected account used for chat routing.
-// Region is always CN for QoderWork.
 func handleSelectAuth(req pluginapi.ManagementRequest) map[string]any {
 	var body struct {
 		AuthIndex string `json:"auth_index"`
@@ -117,7 +116,7 @@ func handleSelectAuth(req pluginapi.ManagementRequest) map[string]any {
 		return map[string]any{
 			"ok":          true,
 			"active_auth": f.ID,
-			"region":      "cn",
+			"region":      string(sa.region()),
 			"nickname":    sa.Account.Nickname,
 			"uid":         sa.Account.UID,
 		}
@@ -156,7 +155,7 @@ func handleCreditsQuery(req pluginapi.ManagementRequest) map[string]any {
 				"auth_index": authIndex,
 				"nickname":   sa.Account.Nickname,
 				"uid":        sa.Account.UID,
-				"region":     "cn",
+				"region":     string(sa.region()),
 				"name":       f.Name,
 				"label":      f.Label,
 				"disabled":   f.Disabled,

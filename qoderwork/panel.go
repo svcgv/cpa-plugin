@@ -94,7 +94,7 @@ func buildDashboardEx(force, fetchCredits bool) map[string]any {
 			}
 			acct.Nickname = sa.Account.Nickname
 			acct.UID = sa.Account.UID
-			acct.Region = "cn"
+			acct.Region = string(sa.region())
 			if fetchCredits {
 				plan, ci, cr, errs := cachedAccountDetails(f.ID, sa, force)
 				acct.Plan = plan

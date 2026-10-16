@@ -80,7 +80,7 @@ func refreshCall(sa *storedAuth) (json.RawMessage, []byte, int, error) {
 	// coexist as fallback and must not hijack OAuth refreshes.
 	if strings.HasPrefix(sa.Auth.RefreshToken, "drt-") {
 		body, _ := json.Marshal(map[string]string{"refresh_token": sa.Auth.RefreshToken})
-		data, status, err := doRawJSON(sharedHTTPClient(), http.MethodPost, upstreamBaseCN+"/api/v1/deviceToken/refresh", nil, bytes.NewReader(body))
+		data, status, err := doRawJSON(sharedHTTPClient(), http.MethodPost, sa.endpoints().OpenAPI+"/api/v1/deviceToken/refresh", nil, bytes.NewReader(body))
 		if err == nil {
 			return data, data, status, nil
 		}

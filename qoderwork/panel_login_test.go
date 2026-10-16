@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -277,5 +278,67 @@ func TestQoderPanelLoginSessionsAreIndependent(t *testing.T) {
 	}
 	if a["url"] == b["url"] {
 		t.Fatal("two logins shared an authorization URL (PKCE challenge reused)")
+	}
+}
+
+// The panel can start an international login; the authorization URL must be on
+// qoder.com with the international redirect and the persisted credential must
+// carry region=intl.
+func TestQoderPanelLoginInternationalRegion(t *testing.T) {
+	f := &qwFakeAuthUpstream{ready: true}
+	withQWAuthUpstream(t, f)
+	saved := withQWCapturedPersist(t)
+
+	start := handlePanelLoginStart(qwMgmtReq(t, map[string]any{"region": "intl"}))
+	if start["success"] != true {
+		t.Fatalf("start: %#v", start)
+	}
+	authURL := start["url"].(string)
+	if !strings.HasPrefix(authURL, qoderIntlWebsite+"/device/selectAccounts") {
+		t.Fatalf("intl auth URL = %q", authURL)
+	}
+	if !strings.Contains(authURL, "redirect_uri="+url.QueryEscape(qoderIntlRedirectURI)) {
+		t.Fatalf("intl auth URL missing intl redirect: %q", authURL)
+	}
+	if start["region"] != "intl" {
+		t.Errorf("region = %v want intl", start["region"])
+	}
+
+	sessionID := start["session_id"].(string)
+	status := handlePanelLoginStatus(qwMgmtReq(t, map[string]any{"session_id": sessionID}))
+	if status["status"] != "success" {
+		t.Fatalf("status = %#v", status)
+	}
+	if len(*saved) != 1 {
+		t.Fatalf("persisted %d credentials, want 1", len(*saved))
+	}
+	sa := (*saved)[0]
+	if sa.Auth.Region != "intl" {
+		t.Errorf("stored region = %q want intl", sa.Auth.Region)
+	}
+	if sa.Auth.Domain != qoderDomainIntl {
+		t.Errorf("stored domain = %q want %q", sa.Auth.Domain, qoderDomainIntl)
+	}
+	if status["region"] != "intl" {
+		t.Errorf("status region = %v want intl", status["region"])
+	}
+}
+
+// A default (no region) login keeps the historical CN behaviour.
+func TestQoderPanelLoginDefaultsToCN(t *testing.T) {
+	f := &qwFakeAuthUpstream{ready: true}
+	withQWAuthUpstream(t, f)
+	saved := withQWCapturedPersist(t)
+
+	start := handlePanelLoginStart(qwMgmtReq(t, nil))
+	if start["region"] != "cn" {
+		t.Fatalf("default region = %v want cn", start["region"])
+	}
+	if !strings.HasPrefix(start["url"].(string), qoderWebsiteCN) {
+		t.Fatalf("default URL not CN: %q", start["url"])
+	}
+	handlePanelLoginStatus(qwMgmtReq(t, map[string]any{"session_id": start["session_id"].(string)}))
+	if len(*saved) != 1 || (*saved)[0].Auth.Region != "cn" {
+		t.Fatalf("default stored region wrong: %#v", *saved)
 	}
 }

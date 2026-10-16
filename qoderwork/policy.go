@@ -139,15 +139,18 @@ func shouldReenableCN(disabled bool, cr *creditsSummary) bool {
 
 // displayNote builds a one-line note for CPAMP Auth cards.
 func displayNote(sa *storedAuth, cr *creditsSummary, disabled bool) string {
-	region := strings.ToUpper("cn")
-	if region == "CN" {
-		region = "CN"
-	} else {
-		region = "CN"
+	region := "CN"
+	if sa != nil && !sa.isCN() {
+		region = "INTL"
 	}
 	parts := []string{region}
 	if disabled {
 		parts = append(parts, "已禁用")
+	}
+	if region == "INTL" {
+		// The international realm has no credit packages or check-in; do not
+		// claim a credit state we cannot measure.
+		return strings.Join(parts, " · ")
 	}
 	switch {
 	case cr == nil:
@@ -170,15 +173,15 @@ func displayNote(sa *storedAuth, cr *creditsSummary, disabled bool) string {
 	return note
 }
 
-// labelForAuth adds [CN] for host labels.
+// labelForAuth adds a [CN]/[INTL] realm tag for host labels.
 func labelForAuth(sa *storedAuth) string {
 	base := "QoderWork"
 	if sa != nil && strings.TrimSpace(sa.Account.Nickname) != "" {
 		base = strings.TrimSpace(sa.Account.Nickname)
 	}
 	tag := "CN"
-	if "cn" == "global" {
-		tag = "CN"
+	if sa != nil && !sa.isCN() {
+		tag = "INTL"
 	}
 	return base + " [" + tag + "]"
 }

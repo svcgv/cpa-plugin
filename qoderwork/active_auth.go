@@ -1,9 +1,9 @@
 // active_auth.go tracks the panel-selected QoderWork account used for routing.
 //
-// Region is always CN for QoderWork —
-// no per-request JWT iss decode. Default: first available candidate. When the
-// active account is exhausted/disabled/missing, randomly switch to another
-// non-exhausted candidate and remember the choice.
+// Both realms (CN and international) share this picker; the realm is carried by
+// the selected auth record, not by this state. Default: first available
+// candidate. When the active account is exhausted/disabled/missing, randomly
+// switch to another non-exhausted candidate and remember the choice.
 package main
 
 import (

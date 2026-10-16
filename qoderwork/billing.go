@@ -39,6 +39,9 @@ func fetchCheckinStatus(sa *storedAuth) (*checkinSummary, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamBaseCN+"/sash/api/v1/me/daily-check-in/status", nil)
+	if !sa.isCN() {
+		return nil, errCheckinUnsupported
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +105,7 @@ type quotaUsageResponse struct {
 // fetchUserResource queries QoderWork's quota endpoint and aggregates base +
 // add-on credits into the panel's creditsSummary shape.
 func fetchUserResource(sa *storedAuth) (*creditsSummary, error) {
-	req, err := http.NewRequest(http.MethodGet, upstreamBaseCN+"/api/v2/quota/usage", nil)
+	req, err := http.NewRequest(http.MethodGet, sa.endpoints().OpenAPI+"/api/v2/quota/usage", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +147,7 @@ type planResponse struct {
 }
 
 func fetchPaymentType(sa *storedAuth) string {
-	req, err := http.NewRequest(http.MethodGet, upstreamBaseCN+"/api/v2/user/plan", nil)
+	req, err := http.NewRequest(http.MethodGet, sa.endpoints().OpenAPI+"/api/v2/user/plan", nil)
 	if err != nil {
 		return ""
 	}
@@ -165,6 +168,9 @@ func fetchPaymentType(sa *storedAuth) string {
 }
 
 func performCheckinCall(sa *storedAuth) (map[string]any, error) {
+	if !sa.isCN() {
+		return nil, errCheckinUnsupported
+	}
 	req, err := http.NewRequest(http.MethodPost, upstreamBaseCN+"/sash/api/v1/me/daily-check-in/claim", strings.NewReader("{}"))
 	if err != nil {
 		return nil, err

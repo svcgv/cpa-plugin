@@ -126,7 +126,13 @@ type userInfoResponse struct {
 // auth's identity fields (uid, nickname, user_type for COSY signing).
 // The endpoint returns plain JSON (no envelope) — same as jobToken/exchange.
 func fetchUserInfo(jt string) (*userInfoResponse, error) {
-	req, err := http.NewRequest(http.MethodGet, endpointUserInfo, nil)
+	return fetchUserInfoAt(endpointUserInfo, jt)
+}
+
+// fetchUserInfoAt queries /api/v1/userinfo at an explicit base so the
+// international realm (openapi.qoder.sh) can resolve identity too.
+func fetchUserInfoAt(base, jt string) (*userInfoResponse, error) {
+	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(base, "/")+"/api/v1/userinfo", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -318,11 +324,21 @@ func handleStartLogin(raw []byte) ([]byte, error) {
 var devicePollBase = upstreamBaseCN
 
 func pollDeviceToken(nonce, verifier string) (*deviceTokenResponse, bool, error) {
+	return pollDeviceTokenAt(devicePollBase, nonce, verifier)
+}
+
+// pollDeviceTokenAt performs one device-token poll against an explicit OpenAPI
+// base, so the CN and international realms share the flow.
+func pollDeviceTokenAt(base, nonce, verifier string) (*deviceTokenResponse, bool, error) {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	if base == "" {
+		base = devicePollBase
+	}
 	q := url.Values{}
 	q.Set("nonce", nonce)
 	q.Set("verifier", verifier)
 	q.Set("challenge_method", "S256")
-	fullURL := devicePollBase + "/api/v1/deviceToken/poll?" + q.Encode()
+	fullURL := base + "/api/v1/deviceToken/poll?" + q.Encode()
 
 	req, err := http.NewRequest(http.MethodGet, fullURL, nil)
 	if err != nil {
@@ -354,8 +370,18 @@ func pollDeviceToken(nonce, verifier string) (*deviceTokenResponse, bool, error)
 
 // refreshDeviceToken calls POST /api/v1/deviceToken/refresh with a drt-.
 func refreshDeviceToken(drt string) (*deviceTokenResponse, error) {
+	return refreshDeviceTokenAt(upstreamBaseCN, drt)
+}
+
+// refreshDeviceTokenAt refreshes a device grant against an explicit OpenAPI
+// base so CN and international accounts share the flow.
+func refreshDeviceTokenAt(base, drt string) (*deviceTokenResponse, error) {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	if base == "" {
+		base = upstreamBaseCN
+	}
 	body, _ := json.Marshal(map[string]string{"refresh_token": drt})
-	data, _, err := doRawJSON(sharedHTTPClient(), http.MethodPost, upstreamBaseCN+"/api/v1/deviceToken/refresh", nil, bytes.NewReader(body))
+	data, _, err := doRawJSON(sharedHTTPClient(), http.MethodPost, base+"/api/v1/deviceToken/refresh", nil, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -579,8 +605,9 @@ func handleRefreshAuth(raw []byte) ([]byte, error) {
 	}
 
 	if strings.HasPrefix(sa.Auth.RefreshToken, "drt-") {
-		// OAuth device family — deviceToken/refresh ONLY.
-		tok, err := refreshDeviceToken(sa.Auth.RefreshToken)
+		// OAuth device family — deviceToken/refresh ONLY, against the realm the
+		// credential was issued by.
+		tok, err := refreshDeviceTokenAt(sa.endpoints().OpenAPI, sa.Auth.RefreshToken)
 		if err != nil {
 			return nil, fmt.Errorf("refresh rejected: %w — deviceToken refresh failed; re-login via OAuth required", err)
 		}

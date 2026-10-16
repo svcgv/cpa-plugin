@@ -29,6 +29,7 @@ import (
 // panelLoginSession is one in-flight panel-driven device authorization.
 type panelLoginSession struct {
 	ID        string
+	Region    qoderRegion
 	Nonce     string
 	Verifier  string
 	MachineID string
@@ -88,8 +89,17 @@ func nextPanelLoginID() string {
 	return "qw-panel-" + fmt.Sprintf("%d", time.Now().UnixNano())
 }
 
-// handlePanelLoginStart begins a CN device-authorization flow.
+// handlePanelLoginStart begins a device-authorization flow for the requested
+// realm. Body: {"region": "cn" | "intl"}; an absent region keeps the historical
+// CN behaviour.
 func handlePanelLoginStart(req pluginapi.ManagementRequest) map[string]any {
+	var body struct {
+		Region string `json:"region"`
+	}
+	_ = json.Unmarshal(req.Body, &body)
+	region := parseRegionValue(body.Region)
+	eps := endpointsForRegion(region)
+
 	verifier, challenge := makePKCE()
 	nonce := uuid.NewString()
 	machineID := defaultMachineID()
@@ -99,13 +109,14 @@ func handlePanelLoginStart(req pluginapi.ManagementRequest) map[string]any {
 	q.Set("challenge_method", "S256")
 	q.Set("nonce", nonce)
 	q.Set("machine_id", machineID)
-	q.Set("client_id", qoderClientID)
-	q.Set("redirect_uri", qoderRedirectURI)
-	authURL := qoderWebsiteCN + "/device/selectAccounts?" + q.Encode()
+	q.Set("client_id", eps.ClientID)
+	q.Set("redirect_uri", eps.RedirectURI)
+	authURL := eps.Website + "/device/selectAccounts?" + q.Encode()
 
 	now := time.Now()
 	session := &panelLoginSession{
 		ID:        nextPanelLoginID(),
+		Region:    region,
 		Nonce:     nonce,
 		Verifier:  verifier,
 		MachineID: machineID,
@@ -123,8 +134,8 @@ func handlePanelLoginStart(req pluginapi.ManagementRequest) map[string]any {
 		// browser would parse "amp;nonce"/"amp;challenge" as query keys. The
 		// percent-encoded form contains no "&" and survives intact.
 		"url_encoded": url.QueryEscape(authURL),
-		"region":      "cn",
-		"service":     "qoder-cn",
+		"region":      string(region),
+		"service":     serviceNameForRegion(region),
 		"expires_at":  session.ExpiresAt.UTC().Format(time.RFC3339),
 	}
 }
@@ -145,6 +156,10 @@ func handlePanelLoginStatus(req pluginapi.ManagementRequest) map[string]any {
 		return map[string]any{"status": "error", "error": "登录会话不存在或已失效，请重新发起"}
 	}
 	session := v.(*panelLoginSession)
+	region := session.Region
+	if region == "" {
+		region = regionCN
+	}
 
 	if session.isCancelled() {
 		return map[string]any{"status": "cancelled", "message": "登录已取消"}
@@ -158,14 +173,14 @@ func handlePanelLoginStatus(req pluginapi.ManagementRequest) map[string]any {
 		return map[string]any{"status": "cancelled", "message": "登录已取消"}
 	}
 	if session.completed {
-		return map[string]any{"status": "success", "region": "cn", "service": "qoder-cn"}
+		return map[string]any{"status": "success", "region": string(region), "service": serviceNameForRegion(region)}
 	}
 	if time.Now().After(session.ExpiresAt) {
 		panelLogins.Delete(id)
 		return map[string]any{"status": "error", "error": "登录已超时，请重新发起"}
 	}
 
-	tok, pending, err := pollDeviceToken(session.Nonce, session.Verifier)
+	tok, pending, err := pollDeviceTokenAt(endpointsForRegion(region).OpenAPI, session.Nonce, session.Verifier)
 	if err != nil {
 		return map[string]any{"status": "error", "error": "授权轮询失败：" + truncateRedacted(err.Error(), 140)}
 	}
@@ -186,13 +201,15 @@ func handlePanelLoginStatus(req pluginapi.ManagementRequest) map[string]any {
 	}
 	sa := buildStoredAuthFromDeviceTokenWithPAT(tok, nil, pat)
 	sa.Auth.MachineID = session.MachineID
+	sa.Auth.Region = string(region)
+	sa.Auth.Domain = domainForRegion(region)
 	if err := panelAuthPersist(sa); err != nil {
 		// Keep the session so the user can retry the save without authorizing
 		// again in the browser.
 		return map[string]any{"status": "error", "error": "保存凭证失败：" + err.Error()}
 	}
 	session.completed = true
-	out := map[string]any{"status": "success", "region": "cn", "service": "qoder-cn"}
+	out := map[string]any{"status": "success", "region": string(region), "service": serviceNameForRegion(region)}
 	out["uid"] = sa.Account.UID
 	out["nickname"] = sa.Account.Nickname
 	return out

@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.7.0
+
+### Add the international realm (qoder.com)
+
+QoderWork CN and international are separate services with separate accounts and
+a different inference protocol. The plugin now carries a realm on every
+credential and routes accordingly; existing CN credentials are untouched
+(region defaults to CN, inferred from the legacy `domain` field).
+
+- Panel OAuth login gained a region selector (国内版 qoder.com.cn / 国际版
+  qoder.com). The international flow uses `openapi.qoder.sh` for the device
+  grant and the `qoder://aicoding.aicoding-agent/login-success` redirect.
+- International inference is a plain `Authorization: Bearer {jt-}` call to
+  `api2-v2.qoder.sh/model/v1/chat/completions` (OpenAI Chat Completions, no COSY
+  signing, no agent envelope). Streaming and non-streaming are both supported.
+- Model discovery is realm-aware: CN keeps the COSY catalog; international
+  fetches `/model/v1/models` (OpenAI shape) with a static fallback. `model.static`
+  returns the union when both realms are present; `model.for_auth` is always
+  realm-exact.
+- Token refresh, keepalive and quota/plan lookups pick the endpoint from the
+  credential's realm.
+- Check-in, the Pro upgrade pack and credits-based lifecycle are CN-only;
+  international accounts skip them cleanly instead of erroring.
+- Auth cards show a `[CN]`/`[INTL]` tag, the panel shows region badges plus a
+  CN/INTL filter, and region is persisted in the auth file (`region` field).
+
+Known limitation: the international model-catalog path is not yet confirmed
+against a live international account (unauthenticated probes return 404), so it
+is tried as a candidate list and falls back to a static international catalog.
+
 ## 0.6.0
 
 ### Fix dynamic model discovery (CN) — the "登录后拉取模型异常" root cause

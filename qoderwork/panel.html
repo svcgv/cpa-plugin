@@ -200,6 +200,7 @@ button .spin{border-color:var(--on-acc);border-top-color:transparent}
   <div class="filter-bar" id="filterBar">
     <button type="button" class="ftag active" data-region="all" onclick="filterRegion('all',this)">全部 <span class="cnt" id="cntAll">0</span></button>
     <button type="button" class="ftag" data-region="cn" onclick="filterRegion('cn',this)">CN <span class="cnt" id="cntCn">0</span></button>
+    <button type="button" class="ftag" data-region="intl" onclick="filterRegion('intl',this)">INTL <span class="cnt" id="cntIntl">0</span></button>
     
     <button type="button" class="ftag" data-region="exhausted" onclick="filterRegion('exhausted',this)">耗尽 <span class="cnt" id="cntExhausted">0</span></button>
   </div>
@@ -213,7 +214,11 @@ button .spin{border-color:var(--on-acc);border-top-color:transparent}
       <button type="button" class="modal-x" onclick="closeAddModal()" aria-label="关闭">×</button>
     </div>
     <div class="modal-bd">
-      <p class="hint">在国内版 qoder.com.cn 完成授权，无需 PAT。令牌只写入 CPA 凭证库，不会显示在这里。</p>
+      <p class="hint">选择区域后在对应站点完成授权，无需 PAT。令牌只写入 CPA 凭证库，不会显示在这里。</p>
+      <div class="add-region" style="display:flex;gap:8px;margin:0 0 10px">
+        <label style="display:flex;align-items:center;gap:6px"><input type="radio" name="addRegion" value="cn" checked> 国内版 qoder.com.cn</label>
+        <label style="display:flex;align-items:center;gap:6px"><input type="radio" name="addRegion" value="intl"> 国际版 qoder.com</label>
+      </div>
       <div id="addBody" class="add-body"></div>
     </div>
     <div class="modal-ft">
@@ -353,21 +358,24 @@ function card(a){
   const ci=a.checkin||{}, cr=a.credits;
   const exhausted=!!a.exhausted||(!!cr&&(cr.total_remain||0)===0&&((cr.total_used||0)>0||(cr.total_size||0)>0||(cr.packages&&cr.packages.length)));
   const region=a.region||"cn";
-  
+  const isIntl=region==="intl";
   const disabled=!!a.disabled;
   const selected=!!a.selected;
-  const regionBadge=`<span class="badge cn">CN</span>`;
-  // CN: 签到 button + 领取Pro button
-  // active=false means the upstream check-in activity is not enabled for
-  // this account (e.g. Community plan). Show disabled button with '?'.
+  const regionBadge=isIntl?`<span class="badge global">INTL</span>`:`<span class="badge cn">CN</span>`;
+  // CN-only: 签到 + 领取Pro. International accounts have neither the credit
+  // package nor the check-in activity, so the buttons are omitted.
   let actionHTML;
-  const checked=ci.today_checked_in;
-  const ciActive=ci.active!==false; // absent=true (default active)
-  const btnClass=checked?"done":(ciActive?"sec":"done");
-  const btnText=checked?"已签到":(ciActive?"签到":"不可签");
-  const btnDisabled=(checked||!ciActive)?" disabled=\"disabled\"":"";
-  actionHTML=`<button class="${btnClass}" data-action="checkin" data-auth-index="${esc(a.auth_index)}"${btnDisabled}>${btnText}</button>`+
-    `<button class="sec" data-action="claim-pro" data-auth-index="${esc(a.auth_index)}" title="领取Pro升级包">领取Pro</button>`;
+  if(isIntl){
+    actionHTML="";
+  }else{
+    const checked=ci.today_checked_in;
+    const ciActive=ci.active!==false; // absent=true (default active)
+    const btnClass=checked?"done":(ciActive?"sec":"done");
+    const btnText=checked?"已签到":(ciActive?"签到":"不可签");
+    const btnDisabled=(checked||!ciActive)?" disabled=\"disabled\"":"";
+    actionHTML=`<button class="${btnClass}" data-action="checkin" data-auth-index="${esc(a.auth_index)}"${btnDisabled}>${btnText}</button>`+
+      `<button class="sec" data-action="claim-pro" data-auth-index="${esc(a.auth_index)}" title="领取Pro升级包">领取Pro</button>`;
+  }
   const selectBtn=selected
     ? `<button class="done" disabled="disabled">使用中</button>`
     : (disabled?``:`<button class="sec" data-action="select" data-auth-index="${esc(a.auth_index)}">选用</button>`);
@@ -375,9 +383,12 @@ function card(a){
   const badges=(selected?`<span class="badge" style="background:var(--acc-ring);color:var(--acc);border-color:var(--acc)">使用中</span>`:"")+(disabled?`<span class="badge disabled">已禁用</span>`:"")+(exhausted?`<span class="badge exhausted">耗尽</span>`:"")+regionBadge+`<span class="badge ${esc(plan)}">${esc(a.plan||"-")}</span>`;
   const display=(a.nickname||a.label||a.name||"").replace(/^qoderwork-?/i,"");
   const nick=display||("u"+(a.uid||"").slice(-8));
+  const uidLine=isIntl
+    ? esc(a.uid||"")+" · 国际版 qoder.com"
+    : esc(a.uid||"")+" · "+esc(a.name||"");
   return `<div class="card${selected?" selected":""}" data-region="${region}" data-auth="${esc(a.auth_index)}">
   <h2>${esc(nick)} <span style="display:flex;gap:6px;align-items:center">${badges}</span></h2>
-  <div class="uid">${esc(a.uid||"")} · ${esc(a.name||"")}</div>
+  <div class="uid">${uidLine}</div>
   ${progressHTML(cr)}
   ${a.error?`<div class="row"><span class="k">错误</span><span class="v err">${esc(a.error)}</span></div>`:""}
   <div class="actions">${selectBtn}${refreshBtn}${actionHTML}</div>
@@ -484,16 +495,18 @@ function filterRegion(region, btn){
   renderSummary(lastAccounts);
 }
 function updateFilterCounts(accounts){
-  let cn=0, ex=0;
+  let cn=0, intl=0, ex=0;
   (accounts||[]).forEach(a=>{
-    cn++;
+    if((a.region||"cn")==="intl") intl++; else cn++;
     if(a.exhausted||(a.credits&&a.credits.total_remain===0&&(a.credits.total_used>0||(a.credits.packages&&a.credits.packages.length)))) ex++;
   });
   const elAll=document.getElementById("cntAll");
   const elCn=document.getElementById("cntCn");
+  const elIntl=document.getElementById("cntIntl");
   const elEx=document.getElementById("cntExhausted");
   if(elAll) elAll.textContent=String((accounts||[]).length);
   if(elCn) elCn.textContent=String(cn);
+  if(elIntl) elIntl.textContent=String(intl);
   if(elEx) elEx.textContent=String(ex);
 }
 function accountsForFilter(accounts){
@@ -747,7 +760,7 @@ async function selectAuth(idx, btn){
     }
     activeAuthId=d.active_auth||idx;
     const who=d.nickname||idx;
-    const region="CN";
+    const region=(res&&res.region==="intl")?"国际版":"CN";
     toast("已选用","ok",who+" · "+region);
     // Re-render from local state for instant feedback, then soft reload
     (lastAccounts||[]).forEach(a=>{a.selected=(a.auth_index===activeAuthId);});
@@ -887,7 +900,9 @@ async function startAddLogin(btn){
   cancelAddSession();
   const attempt=addAttempt;
   try{
-    const d=await api("/login/start",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+    const regionEl=document.querySelector('input[name="addRegion"]:checked');
+    const region=regionEl?regionEl.value:"cn";
+    const d=await api("/login/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({region:region})});
     if(attempt!==addAttempt) return;
     if(!d.success){setAddStatus(d.error||"发起登录失败","err");return}
     const url=qwSafeURL(d);

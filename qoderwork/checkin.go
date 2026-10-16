@@ -265,6 +265,16 @@ func checkinOneAccount(f pluginapi.HostAuthFileEntry) map[string]any {
 	}
 	out["nickname"] = sa.Account.Nickname
 
+	// Check-in is a CN-only reward surface; international accounts have no
+	// check-in activity, so skip them cleanly instead of erroring.
+	if !sa.isCN() {
+		out["success"] = true
+		out["skipped"] = true
+		out["reason"] = "intl"
+		out["message"] = "国际版无需签到"
+		return out
+	}
+
 	// Step 1: GET status (5s budget).
 	ci, err := fetchCheckinStatus(sa)
 	if err != nil {
@@ -326,6 +336,9 @@ func checkinLockFor(authIndex string) *sync.Mutex {
 // checkProUpgradeEligibility returns whether the account can still claim the
 // one-time Pro Upgrade pack (+1800).
 func checkProUpgradeEligibility(sa *storedAuth) (bool, error) {
+	if !sa.isCN() {
+		return false, errCheckinUnsupported
+	}
 	req, err := http.NewRequest(http.MethodGet, upstreamBaseCN+"/sash/api/v1/me/pro-upgrade/eligibility", nil)
 	if err != nil {
 		return false, err
@@ -413,6 +426,11 @@ func handleClaimPro(req pluginapi.ManagementRequest) map[string]any {
 	out := map[string]any{
 		"auth_index": authIndex,
 		"nickname":   sa.Account.Nickname,
+	}
+	if !sa.isCN() {
+		out["success"] = false
+		out["message"] = "国际版无 Pro 升级包（仅国内版 qoder.com.cn 提供）"
+		return out
 	}
 	eligible, err := checkProUpgradeEligibility(sa)
 	if err != nil {

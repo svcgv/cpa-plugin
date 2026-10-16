@@ -1,19 +1,19 @@
 # QoderWork CPA 插件
 
-[CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) 的 QoderWork（qoder.com.cn，CN 区）Provider 插件：多账号 OAuth/PAT 双登录、动态模型、COSY 签名推理、每日签到、积分面板、token 自动保活。
+[CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) 的 QoderWork Provider 插件：**国内版（qoder.com.cn）+ 国际版（qoder.com）双区域**、多账号 OAuth/PAT 双登录、动态模型、COSY / Bearer 双协议推理、每日签到、积分面板、token 自动保活。
 
 ## 功能
 
 | 能力 | 说明 |
 |---|---|
 | **双登录方式** | ① OAuth 设备授权（PKCE，浏览器授权，dt- 30 天 + drt- 1 年自动旋转）② PAT 导入（pt-，长期有效兜底）——两家族可共存于同一 auth 文件 |
-| **面板 OAuth 登录** | 面板「OAuth 登录」弹窗直接发起设备授权：显示授权链接、可复制/打开、可取消、可重试；登录成功后自动刷新该账号额度与签到状态。仅国内版 qoder.com.cn，不提供国际版选项 |
+| **面板 OAuth 登录** | 面板「OAuth 登录」弹窗可选 **国内版 qoder.com.cn** 或 **国际版 qoder.com**：显示授权链接、可复制/打开、可取消、可重试；登录成功后自动刷新该账号状态。两区域可共存于同一实例 |
 | **Pro 领取** | 面板手动「领取 Pro」：先查 eligibility，可领才 claim 一次性 Pro 升级包（+1800），不自动领取 |
-| **COSY 推理** | RSA 包 AES 会话密钥 + MD5 请求签名，对接 gateway.qoder.com.cn SSE 流式 |
-| **动态模型** | COSY 拉取 `/algo/api/v2/model/list`（bodyless GET，空 body 签名；兼容旧 `?Encode=1`/编码 body 形式），chat + inline scene，10 静态模型兜底；失败原因可在 `/plugins/qoderwork/models/status` 查看 |
-| **每日签到** | 面板手动签到（单账号/批量）+ 09:00/21:00 定时自动签到，签到后返回最新积分快照 |
-| **积分面板** | 账号卡片：昵称/积分/计划/签到状态/操作（签到/刷新/选用） |
-| **token 保活** | 22:00 定时刷新；按 token 前缀路由（drt- → deviceToken/refresh，jrt- → jobToken/refresh），PAT 永不劫持 OAuth 刷新 |
+| **双区域推理** | CN：COSY 签名（RSA 包 AES 会话密钥 + MD5 请求签名）对接 gateway.qoder.com.cn SSE；国际版：`Authorization: Bearer {jt-}` 直连 api2-v2.qoder.sh 的 OpenAI `/model/v1/chat/completions` |
+| **动态模型** | CN：COSY 拉取 `/algo/api/v2/model/list`（bodyless GET，空 body 签名；兼容旧 `?Encode=1`/编码 body 形式），chat + inline scene；国际版：Bearer 拉取 `/model/v1/models`（OpenAI `/v1/models` 形状）。各自有静态兜底；失败原因可在 `/plugins/qoderwork/models/status` 查看 |
+| **每日签到** | 仅国内版：面板手动签到（单账号/批量）+ 09:00/21:00 定时自动签到，签到后返回最新积分快照；国际版账号自动跳过 |
+| **积分面板** | 账号卡片：昵称/区域徽标/积分/计划/签到状态/操作（CN 显示签到+领取Pro；国际版仅刷新/选用） |
+| **token 保活** | 22:00 定时刷新；按 token 前缀路由（drt- → deviceToken/refresh，jrt- → jobToken/refresh），刷新端点按区域选择（qoder.com.cn / qoder.sh）；PAT 永不劫持 OAuth 刷新 |
 | **auth 隔离** | 文件名前缀 `qoderwork-` 过滤，与 workbuddy 等其他插件互不干扰 |
 
 ## 安装
@@ -68,7 +68,7 @@ PAT 与新 token 家族可共存：重新用 OAuth 登录同一账号时，已�
 
 也可以继续用 CPA 自带的 QoderWork OAuth 登录卡片，两者等价。
 
-### 方式二：PAT 导入
+### 方式二：PAT 导入（仅国内版）
 
 1. qoder.com.cn → 设置 → Personal Access Token → 创建（pt- 开头）
 2. 插件面板（`/v0/resource/plugins/qoderwork/panel`）→ 右上角「导入 QoderWork 凭证」→ 粘贴 PAT → 导入
@@ -113,6 +113,24 @@ auth 文件字段（可共存）：
 - 诊断接口：`GET /plugins/qoderwork/models/status` 返回上次拉取来源（dynamic/static）、数量、
   以及每个账号的失败原因；`POST /plugins/qoderwork/models/refresh` 清缓存并立即重拉。
 - 失败退避 2 分钟，避免上游故障时每次 `model.static`/`model.for_auth` 都打满请求。
+
+## 区域（国内版 / 国际版）
+
+两个区域是**完全独立**的服务，账号不互通：
+
+| | 国内版 CN | 国际版 INTL |
+|---|---|---|
+| 站点 | qoder.com.cn | qoder.com |
+| OpenAPI | openapi.qoder.com.cn | openapi.qoder.sh |
+| 推理网关 | gateway.qoder.com.cn | api2-v2.qoder.sh |
+| 推理协议 | COSY 签名 + agent_chat_generation | `Bearer {jt-}` + OpenAI `/model/v1/chat/completions` |
+| 设备授权回调 | `qoder-work-cn://` | `qoder://aicoding.aicoding-agent/login-success` |
+| 模型清单 | `/algo/api/v2/model/list` | `/model/v1/models`（候选） |
+| 签到 / 积分 / Pro 包 | 有 | 无 |
+
+区域在登录时选择并持久化到 auth 文件（`region` 字段，兼容旧的 `domain` 推断）。
+同一实例可同时挂 CN 与国际版账号：面板分别打 `CN` / `INTL` 徽标并按区域筛选，
+`model.for_auth` 永远只返回该账号所属区域的模型，`model.static` 在混合场景返回并集。
 
 ## 参考文档
 

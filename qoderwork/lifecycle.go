@@ -315,6 +315,13 @@ func reconcileOneAccount(authIndex, authID string, force bool) (action lifecycle
 		}
 	}
 
+	// Credits-based lifecycle (auto-disable on exhaustion, auto-reenable after
+	// check-in) is a CN feature: the credit/check-in endpoints only exist on
+	// qoder.com.cn. International accounts have no credits surface here, so
+	// reconcile leaves them untouched.
+	if !sa.isCN() {
+		return lifecycleNone, nil
+	}
 	region := "cn"
 	if region == "cn" && disabled {
 		// Don't re-enable accounts marked session-dead by keepalive.

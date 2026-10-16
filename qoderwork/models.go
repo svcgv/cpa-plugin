@@ -148,7 +148,11 @@ func fetchDynamicModels() []pluginapi.ModelInfo {
 		return models
 	}
 	fallback := wbModels()
+	sawIntl := false
 	if active, _ := modelsBackoffActive(); active {
+		if modelsAnyIntlAuth() {
+			return intlStaticModels()
+		}
 		return fallback
 	}
 	files, err := hostAuthListFiles()
@@ -183,7 +187,10 @@ func fetchDynamicModels() []pluginapi.ModelInfo {
 			lastErr = parseErr
 			continue
 		}
-		dyn, err := callModelsAPIWithFallback(sa)
+		if sa.region() == regionIntl {
+			sawIntl = true
+		}
+		dyn, err := callModelsForAuth(sa)
 		if err != nil {
 			attempts = append(attempts, f.Name+": "+truncateRedacted(err.Error(), 180))
 			lastErr = err
@@ -199,27 +206,105 @@ func fetchDynamicModels() []pluginapi.ModelInfo {
 	if lastErr != nil {
 		setModelsBackoff(lastErr)
 	}
+	if sawIntl {
+		// At least one account is international; present its static list rather
+		// than the CN keys, which the international gateway would reject. When
+		// both realms are present we union the two so neither region's models go
+		// missing on the global /v1/models listing. Per-account routing still
+		// uses model.for_auth, which is always realm-exact.
+		sawCN := modelsAnyCNAuth()
+		if sawCN {
+			fallback = unionModels(wbModels(), intlStaticModels())
+		} else {
+			fallback = intlStaticModels()
+		}
+	}
 	recordModelsStatus("static", len(fallback), attempts, lastErr)
 	return fallback
+}
+
+// modelsAnyIntlAuth reports whether any qoderwork auth belongs to the
+// international realm. Used only for the global static fallback.
+func modelsAnyIntlAuth() bool { return anyAuthRegion(regionIntl) }
+
+// modelsAnyCNAuth reports whether any qoderwork auth belongs to the CN realm.
+func modelsAnyCNAuth() bool { return anyAuthRegion(regionCN) }
+
+func anyAuthRegion(region qoderRegion) bool {
+	files, err := hostAuthListFiles()
+	if err != nil {
+		return false
+	}
+	prefix := providerName + "-"
+	for _, f := range files {
+		if !strings.HasPrefix(strings.ToLower(f.Name), prefix) {
+			continue
+		}
+		raw, err := hostAuthGetByIndex(f.AuthIndex)
+		if err != nil {
+			continue
+		}
+		sa, err := parseStored(raw)
+		if err != nil || sa == nil {
+			continue
+		}
+		if sa.region() == region {
+			return true
+		}
+	}
+	return false
+}
+
+// unionModels concatenates two catalogs, keeping the first occurrence of each
+// model id.
+func unionModels(a, b []pluginapi.ModelInfo) []pluginapi.ModelInfo {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]pluginapi.ModelInfo, 0, len(a)+len(b))
+	for _, list := range [][]pluginapi.ModelInfo{a, b} {
+		for _, m := range list {
+			if _, dup := seen[m.ID]; dup {
+				continue
+			}
+			seen[m.ID] = struct{}{}
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 func fetchDynamicModelsFromStorage(storageJSON []byte) []pluginapi.ModelInfo {
 	if models, ok := cachedDynamicModels(); ok {
 		return models
 	}
-	if active, _ := modelsBackoffActive(); active {
-		return wbModels()
-	}
 	sa, err := parseStored(storageJSON)
 	if err != nil || sa == nil {
 		return fetchDynamicModels()
 	}
-	if dyn, err := callModelsAPIWithFallback(sa); err == nil && len(dyn) > 0 {
+	if active, _ := modelsBackoffActive(); active {
+		if sa.region() == regionIntl {
+			if anyAuthRegion(regionCN) {
+				return unionModels(wbModels(), intlStaticModels())
+			}
+			return intlStaticModels()
+		}
+		return wbModels()
+	}
+	if dyn, err := callModelsForAuth(sa); err == nil && len(dyn) > 0 {
 		storeDynamicModels(dyn)
 		recordModelsStatus("dynamic", len(dyn), nil, nil)
 		return dyn
 	}
 	return fetchDynamicModels()
+}
+
+// callModelsForAuth dispatches catalog discovery by realm: CN uses the
+// COSY-signed gateway endpoint, international uses the OpenAI-style gateway
+// with a Bearer job token.
+func callModelsForAuth(sa *storedAuth) ([]pluginapi.ModelInfo, error) {
+	if sa.region() == regionIntl {
+		return callIntlModelsAPI(sa)
+	}
+	return callModelsAPIWithFallback(sa)
 }
 
 // callModelsAPIWithFallback retries the catalog through a PAT-exchanged job
