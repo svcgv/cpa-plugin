@@ -1,0 +1,82 @@
+qoderwork/checkin.go
+  s_c3436cc3d7705c::t_a8f2b7308563bb 268-277
+  s_c3436cc3d7705c::t_878d6cb5f11a95 430-434
+  s_c3436cc3d7705c::t_fe172aeacd41b8 339-341
+registry.json
+  s_c3436cc3d7705c::t_dc3c9834fb1957 25,27
+qoderwork/policy.go
+  s_c3436cc3d7705c::t_31e1ebebe66f7b 142-144,150-154,176,183-184
+qoderwork/credits_handler.go
+  s_c3436cc3d7705c::t_a5d82d9d87dac8 119,158
+qoderwork/billing.go
+  s_c3436cc3d7705c::t_980a16114ff5eb 171-173
+  s_c3436cc3d7705c::t_fe172aeacd41b8 42-44,108,150
+qoderwork/intl.go
+  s_c3436cc3d7705c::t_d31481264939e4 24,166,182,189,195
+  s_c3436cc3d7705c::t_fb62700a60123f 1-23,25-33,35-105,112-165,167-181,183-188,190-194,196-323
+  s_c3436cc3d7705c::t_8e895e5ae0b325 106-111
+  s_c3436cc3d7705c::t_544d7533b55610 34,359-384,397
+  s_c3436cc3d7705c::t_585f6ecb7042b9 324-358,385-396,398-443
+qoderwork/oauth.go
+  s_c3436cc3d7705c::t_cf160e41ae4468 608-610
+  s_c3436cc3d7705c::t_1e4479038df1ca 129-135
+  s_c3436cc3d7705c::t_f1c580cf6e73ce 327-336,341
+  s_c3436cc3d7705c::t_eb477351a77243 373-382,384
+qoderwork/region.go
+  s_c3436cc3d7705c::t_8e895e5ae0b325 33-36,38
+  s_c3436cc3d7705c::t_db90d41c366298 55-58,61-64,69
+  s_c3436cc3d7705c::t_64ab9f0872ed74 19-22,149-153
+  s_c3436cc3d7705c::t_8cab1197aaf9e7 1-18,23-32,37,39-54,59-60,65-68,70-119
+  s_c3436cc3d7705c::t_1f49e666ae5971 120-148
+qoderwork/main.go
+  s_c3436cc3d7705c::t_53fdc19f384327 676-677,683-686,766-770
+  s_c3436cc3d7705c::t_74942b7107dedb 476-477
+  s_c3436cc3d7705c::t_7a5f0c013e74e2 521,530
+  s_c3436cc3d7705c::t_cfc047d192c908 771
+qoderwork/models.go
+  s_c3436cc3d7705c::t_5c445b6394f6d3 151,190-192,209,283-284,288-290
+  s_c3436cc3d7705c::t_20cb48d2dee178 153-155,210-221,226-273,285-287,308
+  s_c3436cc3d7705c::t_585f6ecb7042b9 193,291-292,300-307
+  s_c3436cc3d7705c::t_4e785c8fe2b022 274,309
+qoderwork/panel.html
+  s_c3436cc3d7705c::t_bc531b541d094b 386-388,391
+  s_c3436cc3d7705c::t_727b09b46eef53 203,217-221,361,364-366,368-378,498,500,505,509,763,903-905
+qoderwork/intl_test.go
+  s_c3436cc3d7705c::t_db90d41c366298 1-194
+qoderwork/active_auth.go
+  s_c3436cc3d7705c::t_d68adc288f8014 3-6
+qoderwork/panel_login.go
+  s_c3436cc3d7705c::t_a9b713284879d3 32,92-94,96-102,112-114,119
+  s_c3436cc3d7705c::t_1f49e666ae5971 137-138,159-162,176,183,204-205,212
+qoderwork/keepalive.go
+  s_c3436cc3d7705c::t_cf160e41ae4468 83
+qoderwork/panel.go
+  s_c3436cc3d7705c::t_1dfba368010791 97
+qoderwork/lifecycle.go
+  s_c3436cc3d7705c::t_ea6686b8111ef3 318-324
+qoderwork/panel_login_test.go
+  s_c3436cc3d7705c::t_58b92c0cfc1776 296-298,300-301
+  s_c3436cc3d7705c::t_e88408bd47c549 7,283-295,299,302-344
+qoderwork/CHANGELOG.md
+  s_c3436cc3d7705c::t_39d3743c2a1e29 3-32
+qoderwork/README.md
+  s_c3436cc3d7705c::t_2af5524dedbc51 3,10,12-16,71,117-134
+qoderwork/VERSION
+  s_c3436cc3d7705c::t_a6547d923013f7 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b6785b1d5155c0fb10fadb9a668b4e3b28a51248",
+  "prompts": {},
+  "sessions": {
+    "s_c3436cc3d7705c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1400d-1022-78f3-85d8-9c7b661b9ae0",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
