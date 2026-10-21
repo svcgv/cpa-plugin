@@ -530,6 +530,12 @@ func rawBool(raw json.RawMessage, def bool) bool {
 
 func (m modelCatalogEntry) enabled() bool { return rawBool(m.Enable, true) }
 
+// vision reports whether the upstream catalog marks this model as
+// image-capable (is_vl). Advertising it through SupportedInputModalities lets
+// clients keep image attachments enabled for vision models and hide them for
+// text-only ones.
+func (m modelCatalogEntry) vision() bool { return rawBool(m.IsVL, false) }
+
 func (m modelCatalogEntry) key() string {
 	if k := strings.TrimSpace(m.Key); k != "" {
 		return k
@@ -662,6 +668,10 @@ func parseModelListResponse(body []byte) ([]pluginapi.ModelInfo, error) {
 			// format identifies the wire protocol the model speaks (openai,
 			// anthropic, ...), not its modality. CPA talks chat-completions
 			// to every QoderWork model, so it is advertised for all of them.
+			modalities := []string{"text"}
+			if m.vision() {
+				modalities = append(modalities, "image")
+			}
 			out = append(out, pluginapi.ModelInfo{
 				ID:                         key,
 				Name:                       name,
@@ -669,6 +679,7 @@ func parseModelListResponse(body []byte) ([]pluginapi.ModelInfo, error) {
 				MaxCompletionTokens:        m.maxCompletion(),
 				OwnedBy:                    providerName,
 				SupportedGenerationMethods: []string{"chat"},
+				SupportedInputModalities:   modalities,
 			})
 		}
 	}

@@ -368,3 +368,34 @@ func TestParseModelAliasAttribute(t *testing.T) {
 		t.Fatalf("pair form = %q", got)
 	}
 }
+
+// The upstream catalog flags vision models with is_vl. CPA clients rely on
+// SupportedInputModalities to know whether they may attach images.
+func TestParseModelListResponseAdvertisesImageModality(t *testing.T) {
+	catalog := `{"assistant":[
+		{"key":"qfmodel","display_name":"Qwen3.8-Flash","enable":true,"is_vl":true},
+		{"key":"dfmodel","display_name":"DeepSeek-Flash","enable":true,"is_vl":1},
+		{"key":"mmodel","display_name":"MiniMax","enable":true,"is_vl":false},
+		{"key":"xmodel","display_name":"NoFlag","enable":true}
+	]}`
+	models, err := parseModelListResponse([]byte(catalog))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	byID := map[string][]string{}
+	for _, m := range models {
+		byID[m.ID] = m.SupportedInputModalities
+	}
+	for _, id := range []string{"qfmodel", "dfmodel"} {
+		mods := byID[id]
+		if len(mods) != 2 || mods[0] != "text" || mods[1] != "image" {
+			t.Fatalf("%s modalities = %v, want [text image]", id, mods)
+		}
+	}
+	if mods := byID["mmodel"]; len(mods) != 1 || mods[0] != "text" {
+		t.Fatalf("mmodel modalities = %v, want [text]", mods)
+	}
+	if mods := byID["xmodel"]; len(mods) != 1 || mods[0] != "text" {
+		t.Fatalf("xmodel modalities = %v, want [text]", mods)
+	}
+}
