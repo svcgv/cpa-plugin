@@ -206,7 +206,13 @@ func TestCallModelsAPIFallsBackToBareCatalogPath(t *testing.T) {
 	if len(models) != 1 || models[0].ID != "bare" {
 		t.Fatalf("models = %#v", models)
 	}
-	if len(paths) < 2 || !strings.HasSuffix(paths[1], "/api/v2/model/list") || strings.Contains(paths[1], "/algo/") {
+	var sawBare bool
+	for _, p := range paths {
+		if strings.HasSuffix(p, "/api/v2/model/list") && !strings.Contains(p, "/algo/") {
+			sawBare = true
+		}
+	}
+	if !sawBare {
 		t.Fatalf("expected bare /api fallback, paths=%v", paths)
 	}
 }

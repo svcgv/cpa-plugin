@@ -404,13 +404,15 @@ func modelListRequestsForBase(baseURL string) []modelListRequest {
 	if strings.Contains(base, "/algo/api/") {
 		bareBase = strings.Replace(base, "/algo/api/", "/api/", 1)
 	}
-	encodedEmpty := qoderEncode([]byte("{}"))
+	// The catalog is GET-only: the gateway answers 400 "Request method 'POST'
+	// not supported". A trailing POST fallback used to overwrite the successful
+	// GET result in models/status, reporting "static" even when discovery had
+	// worked, so only GET variants are attempted here.
 	return []modelListRequest{
 		{Method: http.MethodGet, URL: base + "?Encode=1"},
-		{Method: http.MethodGet, URL: bareBase + "?Encode=1"},
 		{Method: http.MethodGet, URL: base},
+		{Method: http.MethodGet, URL: bareBase + "?Encode=1"},
 		{Method: http.MethodGet, URL: bareBase},
-		{Method: http.MethodPost, URL: base, SignBody: encodedEmpty, SendBody: []byte(encodedEmpty)},
 	}
 }
 

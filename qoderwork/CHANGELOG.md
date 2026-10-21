@@ -42,6 +42,14 @@ signing as CN (`api2-v2.qoder.sh` is the chat endpoint).
 - Stop sending the legacy `Cosy-Sigpath` / `Cosy-Bodyhash` /
   `Cosy-Bodylength` headers: CLI 1.1.69's Wasm client no longer emits them. The
   signature already covers the path and the empty body.
+- Fix host bridged HTTP decoding: the host marshals a real `*http.Response`
+  (`StatusCode`/`Header`/`Body`), but the plugin parsed
+  `status_code`/`headers`/`body`, so every bridged response arrived with status
+  0 and was treated as a transport failure. That discarded a perfectly valid
+  catalog and kept the static list. Both field sets are accepted now.
+- Drop the trailing POST catalog fallback: the gateway is GET-only and answers
+  400 "Request method 'POST' not supported", which overwrote the successful GET
+  result in `/models/status`.
 
 Evidence: REA artifact/JS analysis of `Qoder-Installer-mac-arm64.zip` ->
 `Qoder-0.4.8-mac-arm64.zip` -> `app.asar`, plus the official

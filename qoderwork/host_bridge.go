@@ -150,19 +150,12 @@ func hostHTTPDo(req *http.Request) (*hostHTTPResponse, error) {
 	if err != nil {
 		return hostHTTPDoDirect(req, bodyBytes)
 	}
-	var resp struct {
-		StatusCode int                 `json:"status_code"`
-		Headers    map[string][]string `json:"headers,omitempty"`
-		Body       []byte              `json:"body,omitempty"`
-	}
-	if err := json.Unmarshal(result, &resp); err != nil {
-		return nil, fmt.Errorf("decode host.http.do response: %w", err)
-	}
-	return &hostHTTPResponse{
-		StatusCode: resp.StatusCode,
-		Headers:    http.Header(resp.Headers),
-		Body:       resp.Body,
-	}, nil
+	// The host marshals a real *http.Response, so the field names are Go's
+	// (StatusCode/Header/Body), not snake_case. Older hosts used
+	// status_code/headers; accept both so a status of 0 (which callers treat as
+	// a transport failure) cannot silently discard a good catalog response.
+	status, headers, body := decodeHostHTTPResult(result)
+	return &hostHTTPResponse{StatusCode: status, Headers: headers, Body: body}, nil
 }
 
 // hostHTTPDoDirect executes the request via the plugin's own http.Client.
@@ -385,4 +378,38 @@ func mustJSON(v any) []byte {
 		panic(err)
 	}
 	return b
+}
+
+// decodeHostHTTPResult accepts both the host's Go-field-name response
+// (StatusCode/Header/Body, from marshalling a real *http.Response) and the
+// legacy snake_case form.
+func decodeHostHTTPResult(result []byte) (int, http.Header, []byte) {
+	var resp struct {
+		StatusCode  int                 `json:"StatusCode"`
+		StatusCodeS int                 `json:"status_code"`
+		Header      map[string][]string `json:"Header"`
+		Headers     map[string][]string `json:"headers"`
+		Body        []byte              `json:"Body"`
+		BodyLower   []byte              `json:"body"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return 0, nil, nil
+	}
+	status := resp.StatusCode
+	if status == 0 {
+		status = resp.StatusCodeS
+	}
+	headers := resp.Header
+	if len(headers) == 0 {
+		headers = resp.Headers
+	}
+	body := resp.Body
+	if len(body) == 0 {
+		body = resp.BodyLower
+	}
+	return status, http.Header(headers), body
+}
+
+func decodeHostHTTPResultForTest(result []byte) (int, http.Header, []byte) {
+	return decodeHostHTTPResult(result)
 }
