@@ -1,0 +1,23 @@
+qoderwork/stream.go
+  s_a7da4029901b40::t_92d7c472d3c979 123-127,168-248,287-289,610-612
+qoderwork/stream_test.go
+  s_a7da4029901b40::t_d8d651bd440220 3-6,38-72
+qoderwork/VERSION
+  s_a7da4029901b40::t_71ec9e3a106a50 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "009a44e421c3b1d2dd722f46405648db4e5baade",
+  "prompts": {},
+  "sessions": {
+    "s_a7da4029901b40": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15e74-3615-7e93-b7e9-499b778b07aa",
+        "model": "deepseek-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
