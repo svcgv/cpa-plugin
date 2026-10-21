@@ -1,0 +1,32 @@
+registry.json
+  s_515f352c033a56::t_3e7c97796ce0c2 27
+  s_515f352c033a56::t_a2160fc130a50e 9
+qoderwork_0.5.1_linux_amd64.zip.sha256
+  s_515f352c033a56::t_2b6eb430e4cdec 1
+qoderwork/main.go
+  s_515f352c033a56::t_3e7c97796ce0c2 337
+workbuddy_0.10.5_linux_amd64.zip.sha256
+  s_515f352c033a56::t_2b6eb430e4cdec 1
+qoderwork/VERSION
+  s_515f352c033a56::t_61506fad79b426 1
+workbuddy/VERSION
+  s_515f352c033a56::t_dd8e787f01a390 1
+workbuddy/main.go
+  s_515f352c033a56::t_58a40eb09200cb 346
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fbbe05740fded95e66a1be15cb83f42b3bad2d4a",
+  "prompts": {},
+  "sessions": {
+    "s_515f352c033a56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15c78-040e-7001-b0f9-1915adb5c1b8",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
