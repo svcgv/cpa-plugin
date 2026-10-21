@@ -1,0 +1,41 @@
+qoderwork/sign.go
+  s_042c9b27aa8dac::t_f4c567859588d4 208-216,225-231
+qoderwork/body.go
+  s_042c9b27aa8dac::t_cc218fa92e9ff2 65-70,86,91,94,99,101,104,108,111,114-120,125-128,138,140-173,177
+  s_042c9b27aa8dac::t_12acd61556064a 186-189,199-249,353-355
+  s_042c9b27aa8dac::t_d1b410e21c7038 347,389-393,395-400
+  s_042c9b27aa8dac::t_d6ba7aa67a53a0 409,429
+  s_042c9b27aa8dac::t_c69edf601784c4 250,331-344,356,394,401-402
+  s_042c9b27aa8dac::t_a161345f454739 251,403
+qoderwork/body_test.go
+  s_042c9b27aa8dac::t_3eebfebbc83947 66,86,119,148
+qoderwork/image_upload.go
+  s_042c9b27aa8dac::t_ce0f084688231f 71-75,77-83
+  s_042c9b27aa8dac::t_0d5d8d8fc46935 1-70,76,84-97,99-101,104-106,109-110,113-114,125-198
+  s_042c9b27aa8dac::t_66844b8524ea8e 98,102-103,107-108,111-112,115-124
+qoderwork/main.go
+  s_042c9b27aa8dac::t_3eebfebbc83947 705,792
+  s_042c9b27aa8dac::t_4836d3a982713e 337
+qoderwork/CHANGELOG.md
+  s_042c9b27aa8dac::t_c58278616ddbce 3-18
+qoderwork/VERSION
+  s_042c9b27aa8dac::t_c2095d30a1b727 1
+registry.json
+  s_042c9b27aa8dac::t_630ed8c929ea2d 27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4f502303afeb848cdae4c39b154cf93a272eda4c",
+  "prompts": {},
+  "sessions": {
+    "s_042c9b27aa8dac": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15ca5-4e46-7970-9cc3-f48f1a5cf175",
+        "model": "step-5-preview"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
