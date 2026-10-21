@@ -172,8 +172,8 @@ func newCosySessionWithMachineID(id cosyIdentity, machineID string) (*cosySessio
 }
 
 // cosySigPath returns the request path the COSY signature covers: url.Path
-// with the "/algo" prefix stripped. The gateway signs the path only, never the
-// query string.
+// with the gateway routing prefix ("/algo" or "/api") stripped. The gateway
+// signs the path only, never the query string.
 func cosySigPath(rawURL string) (string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -182,6 +182,10 @@ func cosySigPath(rawURL string) (string, error) {
 	pathSig := u.Path
 	if strings.HasPrefix(pathSig, "/algo") {
 		pathSig = pathSig[len("/algo"):]
+	} else if strings.HasPrefix(pathSig, "/api/v2/") && !strings.Contains(pathSig, "/algo/") {
+		// Bare catalog form: /api/v2/model/list. The COSY signature covers
+		// the routed path without the /api prefix, i.e. /v2/model/list.
+		pathSig = pathSig[len("/api"):]
 	}
 	return pathSig, nil
 }

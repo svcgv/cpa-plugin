@@ -350,10 +350,32 @@ func handleExecStreamIntl(req executorStreamRequest, sa *storedAuth, started tim
 	return okEnvelope(streamResponse{Headers: headers})
 }
 
-// callIntlModelsAPI fetches the international catalog. The endpoint path is not
-// yet confirmed against a live account, so a failure here returns the static
-// international list rather than an error — discovery must never break chat.
+// qoderIntlCatalogGateway is the international gateway that serves the model
+// catalog. It is not the chat gateway: CLI 1.1.69 sends catalog requests to
+// api2.qoder.sh/algo/api/v2/model/list (COSY-signed), while chat uses
+// api2-v2.qoder.sh/model/v1/chat/completions.
+const qoderIntlCatalogGateway = "https://api2.qoder.sh"
+
+// intlCatalogGatewayOverride lets tests point the international catalog at a
+// local server. Empty in production.
+var intlCatalogGatewayOverride = ""
+
+func intlCatalogBase(sa *storedAuth) string {
+	if intlCatalogGatewayOverride != "" {
+		return intlCatalogGatewayOverride + "/algo/api/v2/model/list"
+	}
+	return qoderIntlCatalogGateway + "/algo/api/v2/model/list"
+}
+
+// callIntlModelsAPI fetches the international catalog. Qoder CLI 1.1.69 uses
+// the same COSY-signed scene catalog for both realms, so that is tried first;
+// the Bearer /model/v1/models candidates remain as a fallback for other
+// gateway builds. A failure here returns an error and the caller falls back to
+// the static international list — discovery must never break chat.
 func callIntlModelsAPI(sa *storedAuth) ([]pluginapi.ModelInfo, error) {
+	if models, err := callModelsAPIWithBase(sa, intlCatalogBase(sa)); err == nil && len(models) > 0 {
+		return models, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	var lastErr error

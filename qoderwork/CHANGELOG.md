@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.7.1
+
+### Fix "only auto works": read the current catalog scene and stop sharing a stale cache
+
+Qoder 0.4.8 ships Qoder CLI/Worker runtime **1.1.69**. Its catalog response is
+keyed by the client's configured scene, and that default is now `assistant`
+(older builds used `chat`/`inline`). The plugin parsed only `chat`/`inline`, so
+every real model was dropped and the list degraded to the static fallback —
+which is why only `auto` appeared usable.
+
+The international realm had a second, independent defect: the plugin called
+`api2-v2.qoder.sh/model/v1/models` with a Bearer token, but CLI 1.1.69's
+*catalog* endpoint is `api2.qoder.sh/algo/api/v2/model/list` with the same COSY
+signing as CN (`api2-v2.qoder.sh` is the chat endpoint).
+
+- Parse `assistant` first, then `chat`/`inline`, so both current and older
+  gateway builds resolve. Entries from all scenes are merged with duplicate
+  keys collapsed.
+- Accept the mixed boolean encodings the catalog uses (`true/false`, `1/0`,
+  `"1"/"0"`); `enable: 0` was previously treated as enabled.
+- Honour `context_config` windows, `default_context_window`,
+  `available_context_windows`, and string-typed token counts.
+- Namespace the dynamic-model cache per credential owner. It used to be one
+  process-wide entry, so the first account to succeed hid every other
+  account's real catalog — a second source of a wrong, "stale" list in
+  multi-account setups.
+- Keep the CLI 1.1.69 wire shape first (`GET /algo/api/v2/model/list?Encode=1`,
+  bodyless COSY signature) and retain bare-`/api` and encoded-body variants as
+  fallbacks.
+- COSY signature path derivation now also handles a bare `/api/v2/...` URL
+  (signs `/v2/...`) in addition to the `/algo/api/...` form.
+- International catalog discovery now uses the same COSY-signed scene catalog
+  as CN, on the catalog gateway `api2.qoder.sh/algo/api/v2/model/list`
+  (CLI 1.1.69), with the Bearer `/model/v1/models` candidates kept as fallback.
+
+Evidence: REA artifact/JS analysis of `Qoder-Installer-mac-arm64.zip` ->
+`Qoder-0.4.8-mac-arm64.zip` -> `app.asar`, plus the official
+`qodercli-worker-runtime-darwin-arm64` 1.1.69 bundle
+(`listModelsFromRemote`, `WqA`, `wb`, `yu().scene`).
+
 ## 0.7.0
 
 ### Add the international realm (qoder.com)

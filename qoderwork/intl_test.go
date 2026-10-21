@@ -175,6 +175,41 @@ func TestCallIntlModelsAPI(t *testing.T) {
 	}
 }
 
+func TestCallIntlModelsAPIPrefersCOSYCatalog(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if !strings.HasPrefix(r.URL.Path, "/algo/api/v2/model/list") {
+			w.WriteHeader(404)
+			return
+		}
+		if got := r.Header.Get("Authorization"); !strings.HasPrefix(got, "Bearer COSY.") {
+			t.Errorf("catalog auth = %q want COSY", got)
+		}
+		_, _ = w.Write([]byte(`{"assistant":[{"key":"claude-sonnet-4.6","display_name":"Claude Sonnet 4.6","format":"anthropic","enable":true}]}`))
+	}))
+	defer server.Close()
+
+	oldCatalog := intlCatalogGatewayOverride
+	intlCatalogGatewayOverride = server.URL
+	t.Cleanup(func() { intlCatalogGatewayOverride = oldCatalog })
+	oldClient := sharedHTTPClient()
+	sharedClient = server.Client()
+	t.Cleanup(func() { sharedClient = oldClient })
+
+	sa := &storedAuth{Auth: storedTokens{AccessToken: "jt-intl", Region: "intl"}, Account: storedAccount{UID: "uid-intl"}}
+	models, err := callIntlModelsAPI(sa)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].ID != "claude-sonnet-4.6" {
+		t.Fatalf("models = %#v", models)
+	}
+	if len(paths) == 0 || !strings.HasPrefix(paths[0], "/algo/api/v2/model/list") {
+		t.Fatalf("paths = %v want COSY catalog first", paths)
+	}
+}
+
 func TestIntlStaticModelsPresent(t *testing.T) {
 	ms := intlStaticModels()
 	if len(ms) == 0 {

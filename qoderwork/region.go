@@ -28,6 +28,9 @@ const (
 	regionIntl qoderRegion = "intl"
 )
 
+// String makes a realm usable as part of a cache key.
+func (r qoderRegion) String() string { return string(r) }
+
 // qoderEndpointSet is the per-realm service map.
 type qoderEndpointSet struct {
 	Region      qoderRegion

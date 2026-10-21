@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
 func TestQoderEncodeDecodeRoundTrip(t *testing.T) {
@@ -49,7 +51,7 @@ func TestParseModelListResponseFormats(t *testing.T) {
 	}
 }
 
-func TestModelListRequestsStartWithBodylessGET(t *testing.T) {
+func TestModelListRequestsStartWithCurrentCLIEndpoint(t *testing.T) {
 	reqs := modelListRequests()
 	if len(reqs) == 0 {
 		t.Fatal("no request variants")
@@ -58,15 +60,58 @@ func TestModelListRequestsStartWithBodylessGET(t *testing.T) {
 	if first.Method != http.MethodGet {
 		t.Fatalf("first method = %s want GET", first.Method)
 	}
-	if strings.Contains(first.URL, "Encode=1") {
-		t.Fatalf("first URL still carries legacy Encode=1: %q", first.URL)
+	if !strings.Contains(first.URL, "/api/v2/model/list") {
+		t.Fatalf("first URL is not the CLI 1.1.69 catalog path: %q", first.URL)
+	}
+	if !strings.Contains(first.URL, "Encode=1") {
+		t.Fatalf("first URL must request Encode=1: %q", first.URL)
 	}
 	if first.SignBody != "" || len(first.SendBody) != 0 {
 		t.Fatalf("first request must sign and send an empty body: %#v", first)
 	}
+	var sawLegacy bool
+	for _, r := range reqs[1:] {
+		if strings.Contains(r.URL, "/algo/api/v2/model/list") {
+			sawLegacy = true
+		}
+	}
+	if !sawLegacy {
+		t.Fatal("legacy /algo catalog path missing from fallbacks")
+	}
 }
 
-func TestCallModelsAPISignsBodylessGETAndParsesCatalog(t *testing.T) {
+func TestParseModelListResponseAssistantScene(t *testing.T) {
+	const catalog = `{"assistant":[{"key":"qmodel_latest","display_name":"Qwen3.8-Max","format":"openai","enable":1,"is_reasoning":true,"efforts":["low","high"],"default_effort":"high","context_config":{"200k":{"token_count":200000,"is_default":true},"1m":{"token_count":1000000}},"max_output_tokens":65536},{"key":"disabled","display_name":"Disabled","enable":0}],"chat":[{"key":"qmodel_latest","display_name":"dup"},{"key":"chat_only","display_name":"Chat Only","enable":true}]}`
+	models, err := parseModelListResponse([]byte(catalog))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("models = %#v want 2 (duplicate collapsed, disabled skipped)", models)
+	}
+	if models[0].ID != "qmodel_latest" || models[0].Name != "Qwen3.8-Max" {
+		t.Fatalf("first model = %#v", models[0])
+	}
+	if models[0].ContextLength != 200000 || models[0].MaxCompletionTokens != 65536 {
+		t.Fatalf("assistant model fields = %#v", models[0])
+	}
+	if models[1].ID != "chat_only" {
+		t.Fatalf("chat scene not merged: %#v", models)
+	}
+}
+
+func TestParseModelListResponseEncodedAssistant(t *testing.T) {
+	const catalog = `{"assistant":[{"key":"gmodel","display_name":"GLM-6","enable":true,"context_config":{"default":{"token_count":200000,"is_default":true}},"max_output_tokens":16384}]}`
+	models, err := parseModelListResponse([]byte(qoderEncode([]byte(catalog))))
+	if err != nil {
+		t.Fatalf("parse encoded: %v", err)
+	}
+	if len(models) != 1 || models[0].ID != "gmodel" || models[0].ContextLength != 200000 {
+		t.Fatalf("models = %#v", models)
+	}
+}
+
+func TestCallModelsAPIUsesCurrentCatalogPath(t *testing.T) {
 	var gotBodies []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -74,11 +119,11 @@ func TestCallModelsAPISignsBodylessGETAndParsesCatalog(t *testing.T) {
 		if r.Method != http.MethodGet {
 			t.Errorf("method = %s want GET", r.Method)
 		}
-		if r.URL.RawQuery != "" {
-			t.Errorf("query = %q want empty", r.URL.RawQuery)
+		if got := r.URL.Query().Get("Encode"); got != "1" {
+			t.Errorf("Encode = %q want 1", got)
 		}
-		if got := r.Header.Get("Cosy-Sigpath"); got != "/api/v2/model/list" {
-			t.Errorf("Cosy-Sigpath = %q", got)
+		if got := r.Header.Get("Cosy-Sigpath"); got != "/v2/model/list" {
+			t.Errorf("Cosy-Sigpath = %q want /v2/model/list", got)
 		}
 		if got := r.Header.Get("Cosy-Machinetype"); got != "5" {
 			t.Errorf("Cosy-Machinetype = %q", got)
@@ -87,12 +132,12 @@ func TestCallModelsAPISignsBodylessGETAndParsesCatalog(t *testing.T) {
 			t.Errorf("missing COSY authorization")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"chat":[{"key":"gmodel","display_name":"GLM-6","enable":true}]}`))
+		_, _ = w.Write([]byte(`{"assistant":[{"key":"gmodel","display_name":"GLM-6","enable":true}]}`))
 	}))
 	defer server.Close()
 
 	oldEndpoint := endpointModels
-	endpointModels = server.URL + "/algo/api/v2/model/list"
+	endpointModels = server.URL + "/api/v2/model/list"
 	t.Cleanup(func() { endpointModels = oldEndpoint })
 	oldClient := sharedHTTPClient()
 	sharedClient = server.Client()
@@ -114,17 +159,18 @@ func TestCallModelsAPISignsBodylessGETAndParsesCatalog(t *testing.T) {
 	}
 }
 
-func TestCallModelsAPIFallsBackToLegacyQuery(t *testing.T) {
-	var calls int
+func TestCallModelsAPIFallsBackToBareCatalogPath(t *testing.T) {
+	var paths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		if r.URL.Query().Get("Encode") != "1" {
-			w.WriteHeader(http.StatusForbidden)
-			_, _ = w.Write([]byte(`{"code":"101","message":"Signature invalid"}`))
+		paths = append(paths, r.URL.Path)
+		// Pretend this build only routes the bare /api form.
+		if strings.Contains(r.URL.Path, "/algo/") {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"code":"404"}`))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"chat":[{"key":"legacy","display_name":"Legacy","enable":true}]}}`))
+		_, _ = w.Write([]byte(`{"assistant":[{"key":"bare","display_name":"Bare","enable":true}]}`))
 	}))
 	defer server.Close()
 
@@ -140,11 +186,54 @@ func TestCallModelsAPIFallsBackToLegacyQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("callModelsAPI: %v", err)
 	}
-	if len(models) != 1 || models[0].ID != "legacy" {
+	if len(models) != 1 || models[0].ID != "bare" {
 		t.Fatalf("models = %#v", models)
 	}
-	if calls < 2 {
-		t.Fatalf("expected a fallback attempt, calls=%d", calls)
+	if len(paths) < 2 || !strings.HasSuffix(paths[1], "/api/v2/model/list") || strings.Contains(paths[1], "/algo/") {
+		t.Fatalf("expected bare /api fallback, paths=%v", paths)
+	}
+}
+
+func TestParseModelListResponseTolerantEntryTypes(t *testing.T) {
+	// Mirrors gateway shapes seen in the wild: string token counts, numeric
+	// enable flags, and one malformed record that must not discard its scene.
+	const catalog = `{"assistant":[{"key":"qmodel_latest","display_name":"Qwen3.8-Max","format":"openai","enable":true,"context_config":{"200k":{"token_count":"200000","is_default":true},"1m":{"token_count":1000000}},"max_output_tokens":"65536"},{"key":"dmodel","display_name":"DeepSeek-V4-Pro","format":"anthropic","enable":1,"max_input_tokens":"128000","max_output_tokens":8192},{"key":"off","display_name":"Off","format":"openai","enable":0},{"key":123,"display_name":"Bad"}],"chat":[{"key":"kmodel","display_name":"Kimi-K2.7","format":"openai","enable":true}]}`
+	models, err := parseModelListResponse([]byte(catalog))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(models) != 3 {
+		t.Fatalf("models = %#v want 3", models)
+	}
+	if models[0].ID != "qmodel_latest" || models[0].ContextLength != 200000 || models[0].MaxCompletionTokens != 65536 {
+		t.Fatalf("first model = %#v", models[0])
+	}
+	if models[1].ID != "dmodel" || models[1].ContextLength != 128000 {
+		t.Fatalf("second model = %#v", models[1])
+	}
+	enc, err := parseModelListResponse([]byte(qoderEncode([]byte(catalog))))
+	if err != nil || len(enc) != 3 {
+		t.Fatalf("encoded: %v, models=%d", err, len(enc))
+	}
+}
+
+func TestDynamicModelCacheIsPerAccount(t *testing.T) {
+	clearDynamicModelsCache()
+	t.Cleanup(clearDynamicModelsCache)
+
+	storeDynamicModelsFor("cn:uid-a", []pluginapi.ModelInfo{{ID: "a-model"}})
+	storeDynamicModelsFor("cn:uid-b", []pluginapi.ModelInfo{{ID: "b-model"}})
+
+	a, ok := cachedDynamicModelsFor("cn:uid-a")
+	if !ok || len(a) != 1 || a[0].ID != "a-model" {
+		t.Fatalf("uid-a cache = %#v", a)
+	}
+	b, ok := cachedDynamicModelsFor("cn:uid-b")
+	if !ok || len(b) != 1 || b[0].ID != "b-model" {
+		t.Fatalf("uid-b cache = %#v", b)
+	}
+	if _, ok := cachedDynamicModelsFor("cn:uid-c"); ok {
+		t.Fatal("unexpected cache hit for another account")
 	}
 }
 

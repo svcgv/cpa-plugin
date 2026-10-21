@@ -371,10 +371,13 @@ func wbRegistration() registration {
 }
 
 // endpointModels is the QoderWork CN model-catalog endpoint. It is a var so
-// unit tests can point the fetch at an httptest server. The catalog fetch signs
-// an empty body and sends no query string: current gateway builds reject the
-// legacy ?Encode=1 + "{}"-signed form with a signature error, which silently
-// dropped the dynamic list back to the static fallback.
+// unit tests can point the fetch at an httptest server.
+//
+// Qoder CLI/Worker runtime 1.1.69 (shipped with Qoder 0.4.8) calls
+// `iJ(endpoint, "/api/v2/model/list?Encode=1")`, which prefixes the inference
+// endpoint with `/algo` -> `https://gateway.qoder.com.cn/algo/api/v2/model/list`.
+// models.go also tries the bare `/api/v2/model/list` form for gateway builds
+// that route it directly.
 var endpointModels = gatewayBaseCN + "/algo/api/v2/model/list"
 
 // dynamicModelsCacheTTL bounds how long a fetched model list is reused.
@@ -383,10 +386,16 @@ var endpointModels = gatewayBaseCN + "/algo/api/v2/model/list"
 // upstream call per account.
 const dynamicModelsCacheTTL = 5 * time.Minute
 
-var dynamicModelsCache struct {
-	sync.RWMutex
+// dynamicModelsCache keeps a catalog per credential owner plus a global entry
+// (owner "") for model.static, which carries no credential.
+type dynamicModelsCacheEntry struct {
 	models  []pluginapi.ModelInfo
 	fetched time.Time
+}
+
+var dynamicModelsCache struct {
+	sync.RWMutex
+	entries map[string]*dynamicModelsCacheEntry
 }
 
 //
