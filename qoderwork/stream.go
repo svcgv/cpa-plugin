@@ -120,6 +120,11 @@ func pumpUpstreamStream(httpReq *http.Request, cancel context.CancelFunc, stream
 		if payload == "[DONE]" {
 			break
 		}
+		if err := qoderUpstreamStatusError(payload); err != nil {
+			publishUsage(requestedModel, upstreamModel, authUID, started, usage.Detail{}, true, 0, err.Error())
+			streamEmitError(streamID, err.Error())
+			return
+		}
 		bodyStr := unwrapUpstreamChunk(payload)
 		if bodyStr == "" {
 			unparsed++
@@ -160,6 +165,87 @@ func pumpUpstreamStream(httpReq *http.Request, cancel context.CancelFunc, stream
 	invalidateAccountCredits(authID, authUID)
 }
 
+// qoderUpstreamStatusError inspects one outer gateway SSE frame before it is
+// unwrapped. The gateway answers HTTP 200 and then reports refusals inside the
+// envelope, for example a CALL_COUNT_LIMIT queue notice:
+//
+//	{"statusCodeValue":403,"statusCode":"FORBIDDEN",
+//	 "body":"{\"code\":\"403\",\"message\":\"{...isQueued...}\"}"}
+//
+// Treating that frame as an ordinary chunk leaves the inner OpenAI stream empty
+// and the client waits forever, so surface it as an error instead.
+func qoderUpstreamStatusError(payload string) error {
+	var outer struct {
+		StatusCodeValue int    `json:"statusCodeValue"`
+		StatusCode      string `json:"statusCode"`
+		Body            string `json:"body"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(payload)), &outer); err != nil {
+		return nil
+	}
+	if outer.StatusCodeValue < 400 {
+		return nil
+	}
+	return describeQoderRefusal(outer.StatusCodeValue, outer.Body)
+}
+
+// describeQoderRefusal turns a gateway refusal body into an error message. The
+// queue metadata is nested in up to three layers of JSON-encoded strings
+// (body.message.message), so walk the wrappers instead of guessing a depth.
+func describeQoderRefusal(status int, body string) error {
+	type queueInfo struct {
+		IsQueued          bool   `json:"isQueued"`
+		ModelKey          string `json:"modelKey"`
+		QueueCount        int    `json:"queueCount"`
+		QueueType         string `json:"queueType"`
+		WaitTime          int    `json:"waitTime"`
+		RetryAfterSeconds int    `json:"retryAfterSeconds"`
+	}
+	subCode := ""
+	current := strings.TrimSpace(body)
+	for depth := 0; depth < 4 && current != ""; depth++ {
+		var probe struct {
+			Code    string          `json:"code"`
+			SubCode string          `json:"subCode"`
+			Message json.RawMessage `json:"message"`
+			queueInfo
+		}
+		if err := json.Unmarshal([]byte(current), &probe); err != nil {
+			break
+		}
+		if probe.SubCode != "" {
+			subCode = probe.SubCode
+		}
+		if probe.IsQueued || probe.ModelKey != "" || probe.QueueCount > 0 {
+			msg := fmt.Sprintf("upstream queued: model=%s", probe.ModelKey)
+			if probe.QueueType != "" {
+				msg += " queue=" + probe.QueueType
+			}
+			if probe.QueueCount > 0 {
+				msg += fmt.Sprintf(" count=%d", probe.QueueCount)
+			}
+			if probe.WaitTime > 0 {
+				msg += fmt.Sprintf(" wait=%ds", probe.WaitTime)
+			}
+			if probe.RetryAfterSeconds > 0 {
+				msg += fmt.Sprintf(" retry_after=%ds", probe.RetryAfterSeconds)
+			}
+			if subCode != "" {
+				msg += " (" + subCode + ")"
+			}
+			return fmt.Errorf("%s", msg)
+		}
+		var next string
+		if len(probe.Message) > 0 {
+			if json.Unmarshal(probe.Message, &next) != nil {
+				break
+			}
+		}
+		current = strings.TrimSpace(next)
+	}
+	return fmt.Errorf("upstream %d: %s", status, truncateRedacted(body, 200))
+}
+
 // collectUpstreamStreamQoder is the QoderWork-flavoured synchronous fallback
 // (no async stream id): drain the upstream nested SSE, unwrap the inner
 // OpenAI chunks, return them as a slice. The collector, when non-nil,
@@ -197,6 +283,9 @@ func collectUpstreamStreamQoder(encodedBody string, sa *storedAuth, modelKey str
 		payload := strings.TrimPrefix(line, "data:")
 		if strings.TrimSpace(payload) == "[DONE]" {
 			continue
+		}
+		if err := qoderUpstreamStatusError(payload); err != nil {
+			return chunks, 0, err
 		}
 		bodyStr := unwrapUpstreamChunk(payload)
 		if bodyStr == "" {
@@ -518,6 +607,9 @@ func aggregateQoderSSE(r io.Reader, model string) ([]byte, error) {
 			continue
 		}
 		payload := strings.TrimPrefix(line, "data:")
+		if err := qoderUpstreamStatusError(payload); err != nil {
+			return nil, err
+		}
 		var outer map[string]any
 		if err := json.Unmarshal([]byte(payload), &outer); err != nil {
 			continue
