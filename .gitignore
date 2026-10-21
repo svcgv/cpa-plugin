@@ -12,3 +12,7 @@ qoderwork/qoderwork
 # release archives are build artifacts, not source
 *.zip
 *.zip.sha256
+
+# local CPA harness used for manual plugin verification (binary, runtime dir,
+# and login credentials) — never commit
+.local-cpa/
