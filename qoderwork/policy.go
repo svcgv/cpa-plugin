@@ -152,19 +152,21 @@ func displayNote(sa *storedAuth, cr *creditsSummary, disabled bool) string {
 		// claim a credit state we cannot measure.
 		return strings.Join(parts, " · ")
 	}
+	// Qoder keeps 套餐内 Credits and 资源包 apart. Never present their sum as
+	// the account's own available credits: show both pools explicitly.
+	poolNote := func() string {
+		if cr.PlanSize > 0 || cr.PackSize > 0 || cr.PlanRemain > 0 || cr.PackRemain > 0 {
+			return fmt.Sprintf("套餐余%d 资源包余%d 合计余%d", cr.PlanRemain, cr.PackRemain, cr.TotalRemain)
+		}
+		return fmt.Sprintf("余%d 已用%d 池%d", cr.TotalRemain, cr.TotalUsed, cr.TotalSize)
+	}
 	switch {
 	case cr == nil:
 		parts = append(parts, "积分未知")
 	case isCreditsExhausted(cr):
-		parts = append(parts, fmt.Sprintf("耗尽 · 余%d 已用%d", cr.TotalRemain, cr.TotalUsed))
+		parts = append(parts, "耗尽 · "+poolNote())
 	default:
-		// Show remain as primary (what you can still spend). Used is real cycle spend.
-		// Size (capacity) grows with check-in packs — do not treat size↑ as usage↓.
-		if cr.TotalSize > 0 {
-			parts = append(parts, fmt.Sprintf("余%d 已用%d 池%d", cr.TotalRemain, cr.TotalUsed, cr.TotalSize))
-		} else {
-			parts = append(parts, fmt.Sprintf("余%d 已用%d", cr.TotalRemain, cr.TotalUsed))
-		}
+		parts = append(parts, poolNote())
 	}
 	note := strings.Join(parts, " · ")
 	if len(note) > 80 {

@@ -78,34 +78,113 @@ func fetchLegacyCheckinStatus(sa *storedAuth) (*checkinSummary, error) {
 	return sum, nil
 }
 
-// quotaUsageResponse mirrors GET /api/v2/quota/usage response (plain JSON,
-// no envelope). Both userQuota (base credits) and addOnQuota (one-time pro
-// upgrade + checkin packs) are summed for the panel.
-type quotaUsageResponse struct {
-	UserID               string  `json:"userId"`
-	UserType             string  `json:"userType"`
-	UsageType            string  `json:"usageType"`
-	TotalUsagePercentage float64 `json:"totalUsagePercentage"`
-	IsQuotaExceeded      bool    `json:"isQuotaExceeded"`
-	ExpiresAt            int64   `json:"expiresAt"` // ms epoch
-	UpgradeURL           string  `json:"upgradeUrl"`
-	UserQuota            struct {
-		Total     float64 `json:"total"`
-		Used      float64 `json:"used"`
-		Remaining float64 `json:"remaining"`
-		Unit      string  `json:"unit"`
-	} `json:"userQuota"`
-	AddOnQuota struct {
-		Total     float64 `json:"total"`
-		Used      float64 `json:"used"`
-		Remaining float64 `json:"remaining"`
-	} `json:"addOnQuota"`
+// quotaPool is one Qoder credit pool. Qoder returns numeric fields in both
+// camelCase (/api/v2/quota/usage) and snake_case (/sash/api/v2/me/usage)
+// shapes, so the struct is populated through explicit key lookups below.
+type quotaPool struct {
+	Total     float64
+	Cap       float64
+	Used      float64
+	Remaining float64
+	Unit      string
+	Available *bool
+	DetailURL string
 }
 
-// fetchUserResource queries QoderWork's quota endpoint and aggregates base +
-// add-on credits into the panel's creditsSummary shape.
-func fetchUserResource(sa *storedAuth) (*creditsSummary, error) {
-	req, err := http.NewRequest(http.MethodGet, sa.endpoints().OpenAPI+"/api/v2/quota/usage", nil)
+// quotaUsageResponse mirrors GET /api/v2/quota/usage. The upstream model keeps
+// three pools apart: userQuota is the plan's own credits (套餐内 Credits),
+// addOnQuota is the purchased/bonus resource pack (资源包), and
+// orgResourcePackage is an organization-shared pool. The SDK sums only their
+// remaining values, and the client shows the pools as separate rows.
+type quotaUsageResponse struct {
+	UserQuota     *quotaPool `json:"userQuota"`
+	UserQuotaAlt  *quotaPool `json:"user_quota"`
+	AddOnQuota    *quotaPool `json:"addOnQuota"`
+	AddOnQuotaAlt *quotaPool `json:"add_on_quota"`
+	OrgQuota      *quotaPool `json:"orgResourcePackage"`
+	OrgQuotaAlt   *quotaPool `json:"org_resource_package"`
+	SharedQuota   *quotaPool `json:"shared_quota"`
+}
+
+func (q *quotaUsageResponse) planPool() quotaPool {
+	if q.UserQuota != nil {
+		return *q.UserQuota
+	}
+	if q.UserQuotaAlt != nil {
+		return *q.UserQuotaAlt
+	}
+	return quotaPool{}
+}
+
+func (q *quotaUsageResponse) packPool() quotaPool {
+	if q.AddOnQuota != nil {
+		return *q.AddOnQuota
+	}
+	if q.AddOnQuotaAlt != nil {
+		return *q.AddOnQuotaAlt
+	}
+	return quotaPool{}
+}
+
+func (q *quotaUsageResponse) orgPool() *quotaPool {
+	for _, p := range []*quotaPool{q.OrgQuota, q.OrgQuotaAlt, q.SharedQuota} {
+		if p != nil {
+			return p
+		}
+	}
+	return nil
+}
+
+// summarizeQuotaUsage maps the upstream payload into the panel shape while
+// keeping 套餐内 Credits and 资源包 credits distinguishable. Both are usable, so
+// total_remain still aggregates them for exhaustion decisions, but the panel
+// must not label the aggregate as the account's own available credits.
+func summarizeQuotaUsage(q quotaUsageResponse) *creditsSummary {
+	plan := q.planPool()
+	pack := q.packPool()
+
+	sum := &creditsSummary{
+		PlanRemain:  int64(plan.Remaining),
+		PlanUsed:    int64(plan.Used),
+		PlanSize:    int64(plan.Total),
+		PackRemain:  int64(pack.Remaining),
+		PackUsed:    int64(pack.Used),
+		PackSize:    int64(pack.Total),
+		TotalRemain: int64(plan.Remaining + pack.Remaining),
+		TotalUsed:   int64(plan.Used + pack.Used),
+		TotalSize:   int64(plan.Total + pack.Total),
+		PackCount:   2,
+		Packages: []packageSummary{
+			{Name: "套餐内 Credits", Remain: int64(plan.Remaining), Used: int64(plan.Used), Size: int64(plan.Total)},
+			{Name: "资源包", Remain: int64(pack.Remaining), Used: int64(pack.Used), Size: int64(pack.Total)},
+		},
+	}
+	if org := q.orgPool(); org != nil {
+		sum.SharedRemain = int64(org.Remaining)
+		sum.SharedUsed = int64(org.Used)
+		orgSize := org.Cap
+		if orgSize == 0 {
+			orgSize = org.Total
+		}
+		sum.SharedSize = int64(orgSize)
+		sum.SharedAvailable = org.Available == nil || *org.Available
+		if sum.SharedAvailable {
+			sum.TotalRemain += int64(org.Remaining)
+		}
+	}
+	return sum
+}
+
+// usagePresentationResponse mirrors GET /sash/api/v2/me/usage. Qoder's client
+// uses this endpoint for organization members (isUsagePresentationEnabled),
+// because the per-member view can differ from the plain quota endpoint.
+type usagePresentationResponse struct {
+	DisplayMode string              `json:"displayMode"`
+	QoderUsage  *quotaUsageResponse `json:"qoderUsage"`
+}
+
+func fetchQuotaUsage(sa *storedAuth, path string) (*creditsSummary, error) {
+	req, err := http.NewRequest(http.MethodGet, sa.endpoints().OpenAPI+path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -115,23 +194,37 @@ func fetchUserResource(sa *storedAuth) (*creditsSummary, error) {
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("quota/usage http %d body=%s", resp.StatusCode, truncateRedacted(string(resp.Body), 200))
+		return nil, fmt.Errorf("%s http %d body=%s", path, resp.StatusCode, truncateRedacted(string(resp.Body), 200))
+	}
+	if path == "/sash/api/v2/me/usage" {
+		var p usagePresentationResponse
+		if err := json.Unmarshal(resp.Body, &p); err != nil {
+			return nil, fmt.Errorf("%s parse: %w", path, err)
+		}
+		if p.DisplayMode != "qoder" || p.QoderUsage == nil {
+			// Enterprise billing has no per-account credit pools to display.
+			return nil, fmt.Errorf("%s displayMode=%s", path, p.DisplayMode)
+		}
+		return summarizeQuotaUsage(*p.QoderUsage), nil
 	}
 	var q quotaUsageResponse
 	if err := json.Unmarshal(resp.Body, &q); err != nil {
-		return nil, fmt.Errorf("quota/usage parse: %w", err)
+		return nil, fmt.Errorf("%s parse: %w", path, err)
 	}
-	sum := &creditsSummary{
-		TotalRemain: int64(q.UserQuota.Remaining + q.AddOnQuota.Remaining),
-		TotalUsed:   int64(q.UserQuota.Used + q.AddOnQuota.Used),
-		TotalSize:   int64(q.UserQuota.Total + q.AddOnQuota.Total),
-		PackCount:   2,
-		Packages: []packageSummary{
-			{Name: "基础额度", Remain: int64(q.UserQuota.Remaining), Used: int64(q.UserQuota.Used), Size: int64(q.UserQuota.Total)},
-			{Name: "赠送/签到额度", Remain: int64(q.AddOnQuota.Remaining), Used: int64(q.AddOnQuota.Used), Size: int64(q.AddOnQuota.Total)},
-		},
+	return summarizeQuotaUsage(q), nil
+}
+
+// fetchUserResource returns the account's credit pools. CN clients read the
+// usage-presentation endpoint (org members and personal accounts both answer
+// it); /api/v2/quota/usage remains the fallback because enterprise billing may
+// answer the presentation endpoint with displayMode=enterprise and no pools.
+func fetchUserResource(sa *storedAuth) (*creditsSummary, error) {
+	if sa.isCN() {
+		if cr, err := fetchQuotaUsage(sa, "/sash/api/v2/me/usage"); err == nil {
+			return cr, nil
+		}
 	}
-	return sum, nil
+	return fetchQuotaUsage(sa, "/api/v2/quota/usage")
 }
 
 // planResponse mirrors GET /api/v2/user/plan (plain JSON, no envelope).

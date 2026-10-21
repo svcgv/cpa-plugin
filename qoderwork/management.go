@@ -27,13 +27,31 @@ var billingBase = "https://openapi.qoder.com.cn"
 // -----------------------------------------------------------------------------
 
 type creditsSummary struct {
-	// TotalRemain is currently usable credits across all active packages.
+	// TotalRemain is currently usable credits across all active pools
+	// (套餐内 Credits + 资源包 + available org pool), matching Qoder's own
+	// total_remaining aggregation.
 	TotalRemain int64 `json:"total_remain"`
-	// TotalUsed is consumed credits in the current cycle (sum of packages).
+	// TotalUsed is consumed credits in the current cycle (personal pools).
 	TotalUsed int64 `json:"total_used"`
-	// TotalSize is the credit capacity/pool (sum of package sizes). remain+used ≈ size.
+	// TotalSize is the personal credit capacity (plan + resource packs).
 	TotalSize int64 `json:"total_size"`
-	// PackCount is number of resource packages included in the aggregate.
+	// Plan* is the plan's own monthly quota (Qoder: 套餐内 Credits). This is
+	// the account's own available credits; it must not be conflated with the
+	// resource pack below.
+	PlanRemain int64 `json:"plan_remain"`
+	PlanUsed   int64 `json:"plan_used"`
+	PlanSize   int64 `json:"plan_size"`
+	// Pack* is the purchased/bonus resource pack (Qoder: 资源包).
+	PackRemain int64 `json:"pack_remain"`
+	PackUsed   int64 `json:"pack_used"`
+	PackSize   int64 `json:"pack_size"`
+	// Shared* is an organization-shared pool, reported separately because it
+	// is not the member's own quota.
+	SharedRemain    int64 `json:"shared_remain,omitempty"`
+	SharedUsed      int64 `json:"shared_used,omitempty"`
+	SharedSize      int64 `json:"shared_size,omitempty"`
+	SharedAvailable bool  `json:"shared_available,omitempty"`
+	// PackCount is number of credit pools included in the aggregate.
 	PackCount int `json:"pack_count"`
 	// FetchedAt is when this snapshot was taken (RFC3339). Upstream billing lag
 	// can make remain/used look "stuck" for minutes after chat; compare this

@@ -2,6 +2,20 @@
 
 ## 0.7.8 (qoderwork 0.5.10, work in progress)
 
+### Separate plan credits from resource-pack credits
+
+`/api/v2/quota/usage` returns two distinct pools: `userQuota` is the plan's own
+quota (Qoder UI: 套餐内 Credits) and `addOnQuota` is the purchased/bonus
+resource pack (资源包). The panel previously summed them and labelled the
+aggregate "可用积分", so a resource-pack balance could be mistaken for the
+account's own available credits.
+
+- Parse both pools separately (camelCase and snake_case response shapes).
+- Account cards now show 套餐内 Credits and 资源包 on separate rows, with the
+  aggregate kept only as 合计可用 for exhaustion decisions.
+- Dashboard summary and the CPA auth-card note use the same split.
+- Parse `orgResourcePackage`/`shared_quota` as a separate org pool.
+
 ### Prototype image attachment forwarding
 
 - Parse image references from Chat Completions content parts and Responses
