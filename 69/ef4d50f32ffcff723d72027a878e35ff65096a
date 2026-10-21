@@ -1,0 +1,41 @@
+qoderwork/panel.html
+  s_65421b470eebf1::t_48cc0b02369082 352,536,542,544-545,557,561,593
+  s_65421b470eebf1::t_457a7d4ab3bb3f 540-541
+  s_65421b470eebf1::t_80170c793ffa66 336-343,348-350,353-354
+  s_65421b470eebf1::t_ad011715137567 183,596,598
+  s_65421b470eebf1::t_23400c35c2fa00 585-587
+  s_65421b470eebf1::t_d404d09c65f282 351
+qoderwork/management.go
+  s_65421b470eebf1::t_bc6e1259af7d20 30-32,34,36,38-54
+qoderwork/billing.go
+  s_65421b470eebf1::t_1005a6455bd818 81-85,87-98,100-106,109-146,153-164,170-177,214
+  s_65421b470eebf1::t_66c91d47910b8d 86,165-169
+  s_65421b470eebf1::t_be0ddbe5892cea 147-152
+  s_65421b470eebf1::t_5d14e1d4d6dc8b 217-220,222
+  s_65421b470eebf1::t_738984cda7b4fa 178-187,197-208,212,215-216,221,223-225,227
+qoderwork/policy.go
+  s_65421b470eebf1::t_f97603542f6cbd 155-162,167,169
+qoderwork/billing_test.go
+  s_65421b470eebf1::t_1d6bc74cec3afa 1-72
+  s_65421b470eebf1::t_5fcd2f61aa59b3 73-93
+qoderwork/CHANGELOG.md
+  s_65421b470eebf1::t_d162bcf3a78acc 5-18
+qoderwork/README.md
+  s_65421b470eebf1::t_9e06d35f6b7cfd 87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "69ef4d50f32ffcff723d72027a878e35ff65096a",
+  "prompts": {},
+  "sessions": {
+    "s_65421b470eebf1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15e7f-4242-7d61-aad7-d4823b0b8263",
+        "model": "deepseek-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
