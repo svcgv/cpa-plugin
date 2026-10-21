@@ -1,0 +1,19 @@
+qoderwork/main.go
+  s_515f352c033a56::t_c82d1414ae735a 337
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "057160040f8d818c2bc381fe182b2d424b30fabb",
+  "prompts": {},
+  "sessions": {
+    "s_515f352c033a56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15c78-040e-7001-b0f9-1915adb5c1b8",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
