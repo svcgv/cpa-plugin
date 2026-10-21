@@ -342,6 +342,34 @@ func latestUserImages(messages []openAIMessage) []string {
 	return nil
 }
 
+// messageContent renders one message for the upstream body. Text-only messages
+// stay plain strings; messages carrying images become a content-part array so
+// the attachment reaches the model. The shape mirrors the Qoder CLI runtime:
+//
+//	{"type":"image_url","image_url":{"url":"data:image/png;base64,..."}}
+func messageContent(m openAIMessage) any {
+	if len(m.Images) == 0 {
+		return m.Content
+	}
+	parts := make([]any, 0, len(m.Images)+1)
+	if strings.TrimSpace(m.Content) != "" {
+		parts = append(parts, map[string]any{"type": "text", "text": m.Content})
+	}
+	for _, u := range m.Images {
+		if strings.TrimSpace(u) == "" {
+			continue
+		}
+		parts = append(parts, map[string]any{
+			"type":      "image_url",
+			"image_url": map[string]any{"url": u},
+		})
+	}
+	if len(parts) == 0 {
+		return m.Content
+	}
+	return parts
+}
+
 // buildQoderBody renders the upstream agent_chat_generation body for one request.
 // modelKey is the upstream key (already mapped via cpaToUpstreamKey).
 func buildQoderBody(req *openAIRequest, modelKey, userType string, sa *storedAuth) ([]byte, error) {
@@ -386,20 +414,12 @@ func buildQoderBody(req *openAIRequest, modelKey, userType string, sa *storedAut
 		}
 	}
 
-	// Images: the upstream agent body reads them from chat_context.imageUrls,
-	// and only accepts URLs the gateway itself issued. Client-supplied URLs
-	// (public links, data URLs) are therefore downloaded and re-uploaded via
-	// /algo/api/v2/image/upload; if that fails the image is dropped rather than
-	// sending a URL the gateway would silently ignore.
-	if len(images) > 0 {
-		uploaded := resolveClientImages(sa, images)
-		if len(uploaded) > 0 {
-			if cc, ok := base["chat_context"].(map[string]any); ok {
-				cc["imageUrls"] = uploaded
-			}
-			base["image_urls"] = uploaded
-		}
-	}
+	// Images travel inline in messages, as OpenAI-style content parts. That is
+	// exactly what the Qoder CLI runtime does (its message builder emits
+	// {type:"image_url", image_url:{url:"data:<mime>;base64,..."}}), and a live
+	// gateway probe confirms the model sees them there. chat_context.imageUrls
+	// stays null: filling it (with either a client URL or a re-uploaded one)
+	// never delivered the image to the model.
 
 	// messages: the Qoder template system prompt is kept (the gateway expects
 	// that shape) but its <env> block is rewritten for this host. When the
@@ -430,7 +450,7 @@ func buildQoderBody(req *openAIRequest, modelKey, userType string, sa *storedAut
 		if m.Role == "system" {
 			continue // already emitted first
 		}
-		out = append(out, map[string]any{"role": m.Role, "content": m.Content})
+		out = append(out, map[string]any{"role": m.Role, "content": messageContent(m)})
 	}
 	base["messages"] = out
 

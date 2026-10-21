@@ -170,3 +170,64 @@ func TestClientWorkingDirForms(t *testing.T) {
 		t.Fatal("expected empty for no disclosure")
 	}
 }
+
+// Images must reach the upstream as inline content parts: that is how the
+// Qoder CLI runtime sends attachments, and a live gateway probe confirmed the
+// model actually sees them. Putting the URL in chat_context.imageUrls does not.
+func TestBuildQoderBodyInlinesImagesAsContentParts(t *testing.T) {
+	payload := []byte(`{"model":"dfmodel","messages":[{"role":"user","content":[
+		{"type":"input_text","text":"这张图是什么颜色"},
+		{"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgo="}
+	]}]}`)
+	var req openAIRequest
+	if err := json.Unmarshal(payload, &req); err != nil {
+		t.Fatal(err)
+	}
+	body, err := buildQoderBody(&req, "dfmodel", "personal_professional_trial", nil)
+	if err != nil {
+		t.Fatalf("buildQoderBody: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		t.Fatal(err)
+	}
+	msgs, _ := m["messages"].([]any)
+	if len(msgs) == 0 {
+		t.Fatal("no messages")
+	}
+	last, _ := msgs[len(msgs)-1].(map[string]any)
+	parts, ok := last["content"].([]any)
+	if !ok {
+		t.Fatalf("user content is not a part array: %#v", last["content"])
+	}
+	if len(parts) != 2 {
+		t.Fatalf("parts = %d want 2 (text + image)", len(parts))
+	}
+	img, _ := parts[1].(map[string]any)
+	iu, _ := img["image_url"].(map[string]any)
+	if img["type"] != "image_url" || iu["url"] != "data:image/png;base64,iVBORw0KGgo=" {
+		t.Fatalf("image part = %#v", img)
+	}
+	cc, _ := m["chat_context"].(map[string]any)
+	if cc["imageUrls"] != nil {
+		t.Fatalf("chat_context.imageUrls must stay null, got %#v", cc["imageUrls"])
+	}
+}
+
+// An image-only turn used to fail with "no user message in request".
+func TestBuildQoderBodyAllowsImageOnlyRequest(t *testing.T) {
+	payload := []byte(`{"model":"dfmodel","messages":[{"role":"user","content":[
+		{"type":"input_image","image_url":"https://example.com/a.png"}
+	]}]}`)
+	var req openAIRequest
+	if err := json.Unmarshal(payload, &req); err != nil {
+		t.Fatal(err)
+	}
+	body, err := buildQoderBody(&req, "dfmodel", "personal_professional_trial", nil)
+	if err != nil {
+		t.Fatalf("buildQoderBody: %v", err)
+	}
+	if !strings.Contains(string(body), `"image_url":{"url":"https://example.com/a.png"}`) {
+		t.Fatalf("image part missing from body")
+	}
+}

@@ -68,3 +68,31 @@ JS 应用图：`analyze_javascript_application`
   确认动态来源与模型数量。
 - Wasm 签名内部实现未逐指令分析（REA 当前不支持 wasm 直接打开；已导出内嵌模块
   `qoder_auth_wasm_bg.wasm` 与 `wasm_real.wasm` 供后续 Ghidra 分析）。
+
+## 图片附件为什么“发不出去”（2026-10-21 复核）
+
+现象：插件文本会话正常，带图片时模型回答“没有收到图片”。
+
+REA 复核 `qodercli-worker-runtime 1.1.69`（`qoder-worker-runtime.obf.mjs`）：
+
+- 消息构造 `$dA → Ynl/Jnl`：附件被渲染进 `messages[].content` 的内容数组，
+  `{"type":"image_url","image_url":{"url":"data:<mime>;base64,..."}}`；
+- `chat_context` 由 `Eal()` 构造，`imageUrls` 恒为 `null`；
+- `/api/v2/image/upload`（`qDd` / `tFt.upload`，`withSignature("auth")`）属于
+  inference/feedback 的图片上传链路，聊天请求并不经过它。
+
+也就是说：插件此前把图片下载/上传后写进 `chat_context.imageUrls`，
+网关不会把该字段作为模型输入，图片因此被丢弃（上传失败还会静默 continue）。
+
+真实凭证直打 `agent_chat_generation` 的实测：
+
+| 请求形态 | 模型回答 |
+| --- | --- |
+| 纯文本、无 image part | “您的消息中没有附带图片” |
+| `messages` 内联 data URL 图片 | “红/蓝”（正确识别左红右蓝） |
+| `chat_context.imageUrls` | 仍看不到图片 |
+
+修复：`buildQoderBody` 通过 `messageContent()` 把图片作为 content part 内联；
+删除 `image_upload.go` 的上传兜底；新增
+`TestBuildQoderBodyInlinesImagesAsContentParts` 与
+`TestBuildQoderBodyAllowsImageOnlyRequest` 两条回归测试。
