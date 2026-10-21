@@ -8,3 +8,7 @@ dist/
 *.out
 workbuddy/workbuddy-plus
 qoderwork/qoderwork
+
+# release archives are build artifacts, not source
+*.zip
+*.zip.sha256

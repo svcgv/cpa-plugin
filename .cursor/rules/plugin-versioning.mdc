@@ -16,7 +16,8 @@ When bumping a plugin, update all of these in the same change:
 1. `<plugin>/VERSION`
 2. The `var version = "..."` default in `<plugin>/main.go`
 3. The plugin's `version` in `registry.json`
-4. The release archive and checksum names: `<plugin>_<version>_linux_amd64.zip` and `.sha256`
+
+Release archives are local build outputs. Do not commit them: for every plugin, keep `*.zip` and `*.zip.sha256` out of version control, including `<plugin>_<version>_linux_amd64.zip` and its checksum. Generate them only as needed for handoff or release upload.
 
 Build with the release version explicitly:
 
