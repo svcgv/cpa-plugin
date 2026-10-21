@@ -693,6 +693,16 @@ test("CN cards expose the reward action and international cards do not", () => {
   }
 });
 
+test("CN per-reward actions stay collapsed behind one compact menu", () => {
+  const { context } = loadPanel();
+  const html = context.card({ auth_index: "cn-1", region: "cn", service: "cn" });
+  const menu = html.match(/<details class="reward-menu">[\s\S]*?<\/details>/);
+  assert.ok(menu, "expected a reward menu");
+  assert.match(menu[0], /<summary[^>]*>更多奖励/);
+  assert.equal((menu[0].match(/data-action="reward-item"/g) || []).length, 7);
+  assert.doesNotMatch(html.replace(menu[0], ""), /data-action="reward-item"/, "single rewards must not clutter the primary action row");
+});
+
 test("reward run sends only the selected CN account and reports skipped international accounts", async () => {
   const calls = [];
   const { context } = loadPanel({

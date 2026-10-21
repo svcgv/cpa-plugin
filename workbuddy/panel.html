@@ -93,7 +93,19 @@ button.sec{background:var(--btn-sec);color:var(--fg)}button.sec:hover{background
 .pb-track{height:8px;background:var(--surface-muted);border-radius:99px;overflow:hidden}
 .pb-bar{height:100%;background:var(--ok);border-radius:99px;transition:width .6s ease}
 .pb-meta{font-size:11px;color:var(--mut);margin-top:6px}
-.actions{margin-top:12px;display:flex;gap:8px}
+.actions{margin-top:12px;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.card .actions>button,.card .actions>details>summary{padding:7px 10px;font-size:12px;white-space:nowrap}
+.reward-menu{position:relative}
+.reward-menu>summary{list-style:none;cursor:pointer;background:var(--btn-sec);color:var(--fg);border-radius:8px;display:inline-flex;align-items:center;gap:6px;user-select:none}
+.reward-menu>summary::-webkit-details-marker{display:none}
+.reward-menu>summary:hover,.reward-menu[open]>summary{background:var(--btn-sec-hover)}
+.reward-menu .caret{font-size:10px;color:var(--mut);transition:transform .15s ease}
+.reward-menu[open] .caret{transform:rotate(180deg)}
+.reward-menu-panel{position:absolute;right:0;top:calc(100% + 6px);z-index:20;display:grid;grid-template-columns:repeat(2,minmax(96px,1fr));gap:6px;min-width:224px;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:var(--toast-shadow)}
+.reward-menu-panel button{background:var(--surface);color:var(--fg);padding:7px 10px;font-size:12px;text-align:left;white-space:nowrap}
+.reward-menu-panel button:hover{background:var(--btn-sec-hover)}
+.reward-menu-panel button:disabled{opacity:.5}
+.reward-menu-panel button.done{background:var(--ok-soft);color:var(--ok)}
 .field-input{flex:1;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--fg)}
 /* 右上角滑入通知栈 */
 .toasts{position:fixed;top:16px;right:16px;display:flex;flex-direction:column;gap:10px;z-index:9999;max-width:360px}
@@ -418,6 +430,8 @@ function bindCardActions(root){
       else if(act==="claim") claimTrial(idx, ev.currentTarget);
       else if(act==="select") selectAuth(idx, ev.currentTarget);
       else if(act==="refresh") refreshCredits(idx, ev.currentTarget);
+      const owner=ev.currentTarget.closest&&ev.currentTarget.closest(".card");
+      if(owner) owner.querySelectorAll("details.reward-menu[open]").forEach(d=>{d.open=false});
     });
   });
 }
@@ -440,13 +454,15 @@ function card(a){
   // Check-in is part of the CN reward action. International accounts get no
   // check-in or reward entry at all; their one-shot trial stays manual below.
   let actionHTML="";
+  let rewardMenu="";
   if(service==="cn"){
     const checked=ci.today_checked_in;
     const btnClass=checked?"done":"sec";
     const btnText=checked?"已领取":"签到与奖励";
     const btnDisabled=checked?' disabled="disabled"':"";
     actionHTML=`<button class="${btnClass}" data-action="rewards" data-auth-index="${esc(a.auth_index)}"${btnDisabled}>${btnText}</button>`;
-    actionHTML+=Object.keys(REWARD_LABELS).map(k=>`<button class="sec" style="padding:5px 8px;font-size:12px" data-action="reward-item" data-reward-action="${k}" data-auth-index="${esc(a.auth_index)}">${REWARD_LABELS[k]}</button>`).join("");
+    const items=Object.keys(REWARD_LABELS).map(k=>`<button type="button" data-action="reward-item" data-reward-action="${k}" data-auth-index="${esc(a.auth_index)}">${REWARD_LABELS[k]}</button>`).join("");
+    rewardMenu=`<details class="reward-menu"><summary class="reward-menu-toggle" aria-label="更多单项奖励">更多奖励<span class="caret" aria-hidden="true">▼</span></summary><div class="reward-menu-panel" role="group" aria-label="单项奖励">${items}</div></details>`;
   }
   // The expert trial pack is a WorkBuddy-international one-shot only.
   if(service==="workbuddy-global"){
@@ -464,7 +480,7 @@ function card(a){
   <div class="uid">${esc(a.uid||"")} · ${esc(a.name||"")}</div>
   ${progressHTML(cr)}
   ${a.error?`<div class="row"><span class="k">错误</span><span class="v err">${esc(a.error)}</span></div>`:""}
-  <div class="actions">${selectBtn}${refreshBtn}${actionHTML}</div>
+  <div class="actions">${selectBtn}${refreshBtn}${actionHTML}${rewardMenu}</div>
   </div>`;
 }
 let currentFilter="all";
