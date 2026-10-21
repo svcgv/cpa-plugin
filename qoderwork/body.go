@@ -135,6 +135,33 @@ type openAIRequest struct {
 	Model    string          `json:"model"`
 	Messages []openAIMessage `json:"messages"`
 	Stream   bool            `json:"stream"`
+
+	// Clients sometimes disclose their real working directory. Codex puts it
+	// in session metadata; some OpenAI-compatible clients send it at the top
+	// level. The plugin runs inside CPA and cannot read it any other way, so
+	// use it when present instead of claiming a directory that is not the
+	// user's project.
+	CWD      string         `json:"cwd"`
+	Metadata map[string]any `json:"metadata"`
+}
+
+// clientWorkingDir returns the caller's working directory when the request
+// discloses one. Empty means unknown.
+func (r *openAIRequest) clientWorkingDir() string {
+	for _, v := range []string{r.CWD, metaString(r.Metadata, "cwd"), metaString(r.Metadata, "working_directory"), metaString(r.Metadata, "workingDirectory")} {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func metaString(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	s, _ := m[key].(string)
+	return s
 }
 
 // extractLatestUserPrompt returns the content of the last user message.
@@ -152,20 +179,29 @@ func extractLatestUserPrompt(messages []openAIMessage) string {
 // an empty date), so it must never reach an upstream request verbatim.
 var templateEnvRE = regexp.MustCompile(`(?s)<env>.*?</env>`)
 
-// applyEnvironment replaces the template's stale <env> block with this host's
-// real values. Everything else in the template is left untouched because the
-// gateway expects that prompt shape.
-func applyEnvironment(systemPrompt string) string {
-	var wd string
-	if dir, err := os.Getwd(); err == nil {
-		wd = dir
-	}
-	isRepo := "No"
-	if _, err := os.Stat(filepath.Join(wd, ".git")); err == nil {
-		isRepo = "Yes"
+// applyEnvironment rewrites the template's <env> block.
+//
+// The plugin runs inside the CPA host process and CPA does not forward the
+// client's working directory in ExecutorRequest, so os.Getwd() would report the
+// *host* directory (e.g. /CLIProxyAPI inside the container) and the model would
+// confidently claim to be working in someone else's project. Instead of
+// inventing a path, state that it is unknown and let the conversation supply
+// real paths.
+func applyEnvironment(systemPrompt, clientCWD string) string {
+	wd := strings.TrimSpace(clientCWD)
+	isRepo := "unknown"
+	if wd == "" {
+		wd = "unknown (not provided by the client; use paths from the conversation)"
+	} else {
+		isRepo = "No"
+		// The path is on the client's machine, so .git may not be reachable
+		// from this process; only assert "Yes" when it is.
+		if _, err := os.Stat(filepath.Join(wd, ".git")); err == nil {
+			isRepo = "Yes"
+		}
 	}
 	block := fmt.Sprintf("<env>\nWorking directory: %s\nIs directory a git repo: %s\nPlatform: %s\nOS Version: %s\nToday's date: %s\n</env>",
-		firstNonEmpty(wd, "unknown"),
+		wd,
 		isRepo,
 		runtime.GOOS,
 		buildMachineOS(),
@@ -249,7 +285,7 @@ func buildQoderBody(req *openAIRequest, modelKey, userType string) ([]byte, erro
 			}
 			if role, _ := mm["role"].(string); role == "system" {
 				if txt, _ := mm["content"].(string); txt != "" {
-					mm["content"] = applyEnvironment(txt)
+					mm["content"] = applyEnvironment(txt, req.clientWorkingDir())
 				}
 				out = append(out, mm)
 			}

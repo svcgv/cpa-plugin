@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.7.4 (qoderwork 0.5.6)
+
+### Never invent a working directory in the template prompt
+
+The Qoder template's `<env>` block originally carried someone else's machine
+(`D:/Projects/Qoder`, Windows). Version 0.5.5 rewrote it from `os.Getwd()`, but
+the plugin runs inside the CPA host process, whose cwd is generally unrelated to
+the user's project (inside the container it is `/CLIProxyAPI`). The model then
+answered "I'm in /CLIProxyAPI on Linux" for a request made from a completely
+different project.
+
+CPA does not forward the client's working directory through `ExecutorRequest`,
+so the plugin has no reliable source for it.
+
+- If the request discloses a working directory (`cwd` at the top level or under
+  `metadata`, in camelCase or snake_case), use it. Git status is only asserted
+  when `.git` is actually observable from this process.
+- Otherwise say so explicitly:
+  `Working directory: unknown (not provided by the client; use paths from the
+  conversation)` and `Is directory a git repo: unknown`.
+- Never fall back to the host process cwd. A regression test asserts the host
+  cwd never appears in the prompt.
+
+
 ## 0.7.3 (qoderwork 0.5.5)
 
 ### Stop the Qoder template prompt from overriding Codex

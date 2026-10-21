@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -123,10 +124,49 @@ func TestTemplateEnvIsRewrittenForThisHost(t *testing.T) {
 	if strings.Contains(s, "D:/Projects/Qoder") || strings.Contains(s, "MINGW64") {
 		t.Fatal("stale template environment leaked")
 	}
-	if !strings.Contains(s, "Working directory: ") {
-		t.Fatal("env block missing")
+	if !strings.Contains(s, "Working directory: unknown") {
+		t.Fatal("env block must not claim a concrete directory")
+	}
+	// The plugin runs inside CPA, so a host path (e.g. /CLIProxyAPI) must never
+	// be presented to the model as the user's project.
+	if wd, err := os.Getwd(); err == nil && wd != "" && strings.Contains(s, "Working directory: "+wd) {
+		t.Fatalf("host cwd %q leaked into the prompt", wd)
 	}
 	if strings.Contains(s, "Today's date: <no value>") {
 		t.Fatal("date placeholder leaked")
+	}
+}
+
+// When the client discloses its real working directory, the template must use
+// it instead of the (irrelevant) CPA host directory.
+func TestTemplateEnvUsesClientWorkingDirectory(t *testing.T) {
+	req := &openAIRequest{
+		Model:    "qfmodel",
+		Messages: []openAIMessage{{Role: "user", Content: "hi"}},
+		Metadata: map[string]any{"cwd": "/Users/someone/my-project"},
+	}
+	body, err := buildQoderBody(req, "qfmodel", "personal_professional_trial")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "Working directory: /Users/someone/my-project") {
+		t.Fatal("client cwd not used in env block")
+	}
+}
+
+func TestClientWorkingDirForms(t *testing.T) {
+	for name, req := range map[string]*openAIRequest{
+		"top-level": {CWD: "/a"},
+		"metadata":  {Metadata: map[string]any{"cwd": "/b"}},
+		"snake":     {Metadata: map[string]any{"working_directory": "/c"}},
+		"camel":     {Metadata: map[string]any{"workingDirectory": "/d"}},
+		"none":      {},
+	} {
+		if got := req.clientWorkingDir(); got == "" && name != "none" {
+			t.Fatalf("%s: empty", name)
+		}
+	}
+	if (&openAIRequest{}).clientWorkingDir() != "" {
+		t.Fatal("expected empty for no disclosure")
 	}
 }
