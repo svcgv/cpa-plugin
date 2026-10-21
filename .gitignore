@@ -16,3 +16,4 @@ qoderwork/qoderwork
 # local CPA harness used for manual plugin verification (binary, runtime dir,
 # and login credentials) — never commit
 .local-cpa/
+qorder
