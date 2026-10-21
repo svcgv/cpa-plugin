@@ -35,6 +35,21 @@ MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDA8iMH5c02LilrsERw9t6Pv5Nc
 XcW+ML9FoCI6AOvOzwIDAQAB
 -----END PUBLIC KEY-----`
 
+// Official client identity values. Qoder CLI/Worker 1.1.69 builds the
+// catalog request through the Wasm QoderContext with these client metadata
+// values (client_type 5, business_product "cli", business_type "agent",
+// scene "assistant") and its own CLI version as Cosy-Version. The gateway
+// serves a stale catalog when the client identity is missing or pinned to an
+// old version.
+const (
+	cosyClientVersion   = "1.1.69"
+	cosyClientType      = "5"
+	cosyScene           = "assistant"
+	cosyBusinessProduct = "cli"
+	cosyBusinessType    = "agent"
+	cosyUserAgent       = "qodercli/1.1.69"
+)
+
 var serverPubKey *rsa.PublicKey
 
 func init() {
@@ -240,22 +255,25 @@ func (s *cosySession) headers(uid, body, rawURL, accept string, sse bool) (map[s
 		return nil, err
 	}
 	h := map[string]string{
-		"cosy-data-policy":  "AGREE",
-		"content-type":      "application/json",
-		"cosy-machinetype":  s.MachineType,
-		"cosy-clienttype":   "5",
-		"cosy-date":         date,
-		"cosy-user":         uid,
-		"cosy-key":          s.CosyKey,
-		"accept":            accept,
-		"cosy-clientip":     "169.254.198.161",
-		"authorization":     bearer,
-		"accept-encoding":   "identity",
-		"cosy-version":      "0.1.43",
-		"cosy-machineid":    s.MachineID,
-		"cosy-machinetoken": s.MachineToken,
-		"login-version":     "v2",
-		"user-agent":        "Go-http-client/2.0",
+		"cosy-data-policy":      "AGREE",
+		"content-type":          "application/json",
+		"cosy-machinetype":      s.MachineType,
+		"cosy-clienttype":       cosyClientType,
+		"cosy-date":             date,
+		"cosy-user":             uid,
+		"cosy-key":              s.CosyKey,
+		"accept":                accept,
+		"cosy-clientip":         "169.254.198.161",
+		"authorization":         bearer,
+		"accept-encoding":       "identity",
+		"cosy-version":          cosyClientVersion,
+		"cosy-machineid":        s.MachineID,
+		"cosy-machinetoken":     s.MachineToken,
+		"cosy-scene":            cosyScene,
+		"cosy-business-product": cosyBusinessProduct,
+		"cosy-business-type":    cosyBusinessType,
+		"login-version":         "v2",
+		"user-agent":            cosyUserAgent,
 	}
 	if sse {
 		h["cache-control"] = "no-cache"
@@ -278,18 +296,14 @@ func (s *cosySession) modelListHeaders(uid, rawURL string) (map[string]string, e
 	if err != nil {
 		return nil, err
 	}
-	sigPath, err := cosySigPath(rawURL)
-	if err != nil {
-		return nil, err
-	}
-	emptySum := md5.Sum(nil)
+	// The current Wasm client (CLI 1.1.69) no longer sends
+	// Cosy-Sigpath/Cosy-Bodyhash/Cosy-Bodylength; the signature already covers
+	// the path and the (empty) body. Sending the old trio makes the gateway
+	// treat the call as a legacy client and answer with a stale catalog.
 	h["cosy-clientip"] = "127.0.0.1"
 	h["cosy-machinetype"] = "5"
 	h["cosy-machinetoken"] = s.MachineID
 	h["cosy-machineos"] = buildMachineOS()
-	h["cosy-bodyhash"] = hex.EncodeToString(emptySum[:])
-	h["cosy-bodylength"] = "0"
-	h["cosy-sigpath"] = sigPath
 	// Prefer the official client's cached identity when it exists: the gateway
 	// recognises a real installation, and the official Cosy-Version keeps the
 	// catalog request on the same client profile the CLI uses.

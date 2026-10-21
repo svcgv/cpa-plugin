@@ -34,6 +34,14 @@ signing as CN (`api2-v2.qoder.sh` is the chat endpoint).
 - International catalog discovery now uses the same COSY-signed scene catalog
   as CN, on the catalog gateway `api2.qoder.sh/algo/api/v2/model/list`
   (CLI 1.1.69), with the Bearer `/model/v1/models` candidates kept as fallback.
+- Send the client identity the current Wasm client uses: `Cosy-Scene:
+  assistant`, `Cosy-Business-Product: cli`, `Cosy-Business-Type: agent`, and
+  `Cosy-Version: 1.1.69` (it was pinned to `0.1.43`). Verified against the live
+  gateway with a bogus token: `105 Login expired` means the COSY signature was
+  accepted; `101 Signature invalid` would mean it was not.
+- Stop sending the legacy `Cosy-Sigpath` / `Cosy-Bodyhash` /
+  `Cosy-Bodylength` headers: CLI 1.1.69's Wasm client no longer emits them. The
+  signature already covers the path and the empty body.
 
 Evidence: REA artifact/JS analysis of `Qoder-Installer-mac-arm64.zip` ->
 `Qoder-0.4.8-mac-arm64.zip` -> `app.asar`, plus the official

@@ -122,11 +122,28 @@ func TestCallModelsAPIUsesCurrentCatalogPath(t *testing.T) {
 		if got := r.URL.Query().Get("Encode"); got != "1" {
 			t.Errorf("Encode = %q want 1", got)
 		}
-		if got := r.Header.Get("Cosy-Sigpath"); got != "/v2/model/list" {
-			t.Errorf("Cosy-Sigpath = %q want /v2/model/list", got)
+		// CLI 1.1.69's Wasm client no longer sends the legacy body/signature-path
+		// trio; the signature already covers path and body.
+		if got := r.Header.Get("Cosy-Sigpath"); got != "" {
+			t.Errorf("Cosy-Sigpath = %q want empty", got)
+		}
+		if got := r.Header.Get("Cosy-Bodyhash"); got != "" {
+			t.Errorf("Cosy-Bodyhash = %q want empty", got)
 		}
 		if got := r.Header.Get("Cosy-Machinetype"); got != "5" {
 			t.Errorf("Cosy-Machinetype = %q", got)
+		}
+		if got := r.Header.Get("Cosy-Scene"); got != "assistant" {
+			t.Errorf("Cosy-Scene = %q want assistant", got)
+		}
+		if got := r.Header.Get("Cosy-Business-Product"); got != "cli" {
+			t.Errorf("Cosy-Business-Product = %q want cli", got)
+		}
+		if got := r.Header.Get("Cosy-Business-Type"); got != "agent" {
+			t.Errorf("Cosy-Business-Type = %q want agent", got)
+		}
+		if got := r.Header.Get("Cosy-Version"); !strings.HasPrefix(got, "1.") {
+			t.Errorf("Cosy-Version = %q want a 1.x CLI version", got)
 		}
 		if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer COSY.") {
 			t.Errorf("missing COSY authorization")
