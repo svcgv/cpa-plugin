@@ -1,0 +1,19 @@
+.cursor/rules/plugin-versioning.mdc
+  s_515f352c033a56::t_6af413069545ee 1-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4917345f99b4280797cd9882002381d98a90d25c",
+  "prompts": {},
+  "sessions": {
+    "s_515f352c033a56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15c78-040e-7001-b0f9-1915adb5c1b8",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
