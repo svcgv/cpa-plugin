@@ -1,0 +1,31 @@
+qoderwork/body_test.go
+  s_042c9b27aa8dac::t_150448258f9bb5 5,127-133
+  s_042c9b27aa8dac::t_a5d34908b01a03 139-172
+qoderwork/main.go
+  s_042c9b27aa8dac::t_945064fe788c72 337
+qoderwork/body.go
+  s_042c9b27aa8dac::t_cc6491e09244d6 138-164,190-201,204,288
+  s_042c9b27aa8dac::t_b7e1695f98d0ec 182-189
+registry.json
+  s_042c9b27aa8dac::t_945064fe788c72 27
+qoderwork/CHANGELOG.md
+  s_042c9b27aa8dac::t_b660ef782fbd14 3-26
+qoderwork/VERSION
+  s_042c9b27aa8dac::t_d55f7046062880 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4c3e64432c84ddab11d23b15cde426634bb2ae48",
+  "prompts": {},
+  "sessions": {
+    "s_042c9b27aa8dac": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15ca5-4e46-7970-9cc3-f48f1a5cf175",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
