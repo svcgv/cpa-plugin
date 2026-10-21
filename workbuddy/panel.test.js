@@ -461,39 +461,16 @@ test("partial import all failure keeps modal open and sanitizes long names", asy
 // Add-account dialog and capability-aware cards.
 // ---------------------------------------------------------------------------
 
-test("card offers check-in only when the account capability allows it", () => {
+test("cards never offer check-in to international accounts", () => {
   const { context } = loadPanel();
-  const base = {
-    auth_index: "idx-1",
-    nickname: "Nick",
-    region: "global",
-    name: "workbuddy-codebuddy-global-uid-1.json",
-  };
-
-  const unsupported = context.card(Object.assign({}, base, {
-    checkin_capability: "unsupported",
-    checkin: { capability: "unsupported", capability_note: "该账号没有每日签到活动" },
-  }));
-  assert.match(unsupported, /不支持签到/);
-  assert.doesNotMatch(unsupported, /data-action="checkin"/);
-
-  const unknown = context.card(Object.assign({}, base, { checkin_capability: "unknown" }));
-  assert.match(unknown, /data-action="checkin"/);
-  assert.match(unknown, /签到\?/);
-
-  const supported = context.card(Object.assign({}, base, {
-    checkin_capability: "supported",
-    checkin: { today_checked_in: false },
-  }));
-  assert.match(supported, /data-action="checkin"/);
-  assert.doesNotMatch(supported, /签到\?/);
-
-  const already = context.card(Object.assign({}, base, {
-    checkin_capability: "supported",
-    checkin: { today_checked_in: true },
-  }));
-  assert.match(already, /已签到/);
-  assert.match(already, /disabled/);
+  for (const service of ["codebuddy-global", "workbuddy-global"]) {
+    const html = context.card({
+      auth_index: "idx-1", nickname: "Nick", region: "global", service,
+      checkin_capability: "supported", checkin: { today_checked_in: false },
+    });
+    assert.doesNotMatch(html, /data-action="checkin"/);
+    assert.doesNotMatch(html, /data-action="rewards"/);
+  }
 });
 
 test("only the legacy workbuddy-global service offers the expert trial pack", () => {
@@ -702,4 +679,85 @@ test("automatic and manual login links use the decoded authorization URL and pol
   assert.equal(elements.get("addStatus").textContent, "等待浏览器完成授权", "pending message should be updated");
   context.openAddURL();
   assert.equal(opened[1], expected, "manual open must use the same decoded URL");
+});
+
+test("CN cards expose the reward action and international cards do not", () => {
+  const { context } = loadPanel();
+  const cn = context.card({ auth_index: "cn-1", region: "cn", service: "cn", checkin_capability: "supported" });
+  assert.match(cn, /data-action="rewards"/);
+  assert.match(cn, /签到与奖励/);
+  for (const service of ["codebuddy-global", "workbuddy-global"]) {
+    const global = context.card({ auth_index: "g-1", region: "global", service, checkin_capability: "supported" });
+    assert.doesNotMatch(global, /data-action="rewards"/);
+    assert.doesNotMatch(global, /签到与奖励/);
+  }
+});
+
+test("reward run sends only the selected CN account and reports skipped international accounts", async () => {
+  const calls = [];
+  const { context } = loadPanel({
+    sessionEntries: [["workbuddy-mgmt-key", "k"]],
+    fetch: async (url, opts) => {
+      calls.push({ url: String(url), body: opts && opts.body });
+      if (String(url).includes("/rewards/run")) {
+        return fakeResponse(200, "application/json", JSON.stringify({ started: 1, skipped: 2 }));
+      }
+      return fakeResponse(200, "application/json", JSON.stringify({ results: [] }));
+    },
+  });
+  let toastText = "";
+  context.toast = (title, _kind, detail) => { toastText = title + " " + detail; };
+  context.loadRewardStatus = async () => {};
+  await context.runRewards("cn-1", { dataset: {}, innerHTML: "成长奖励", disabled: false });
+  const run = calls.find(call => call.url.includes("/rewards/run"));
+  assert.ok(run, "expected /rewards/run");
+  assert.equal(JSON.parse(run.body).auth_index, "cn-1");
+  assert.match(toastText, /国际版已跳过（2）/);
+});
+
+test("saving reward switches patches the host config and verifies runtime state", async () => {
+  const calls = [];
+  const { context } = loadPanel({ sessionEntries: [["workbuddy-mgmt-key", "k"]] });
+  context.managementAPI = async (url, opts) => {
+    calls.push({ url, body: opts && opts.body, method: opts && opts.method });
+    return {};
+  };
+  context.api = async () => ({
+    auto: false,
+    actions: { checkin: true, travel: false, tasks: true, makeup: true, redeem: true, lottery: false, energy: true },
+    results: [],
+  });
+  await context.saveRewardSettings(
+    { auto: false, actions: { checkin: true, travel: false, tasks: true, makeup: true, redeem: true, lottery: false, energy: true } },
+    d => d.auto === false,
+  );
+  const patch = calls.find(call => call.method === "PATCH");
+  assert.ok(patch, "expected a config PATCH");
+  assert.match(patch.url, /\/plugins\/workbuddy\/config$/);
+  const body = JSON.parse(patch.body);
+  assert.equal(body.rewards.auto, false);
+  assert.equal(body.rewards.actions.travel, false);
+});
+
+test("a per-action reward button sends exactly that action", async () => {
+  const calls = [];
+  const { context } = loadPanel({
+    sessionEntries: [["workbuddy-mgmt-key", "k"]],
+    fetch: async (url, opts) => {
+      calls.push({ url: String(url), body: opts && opts.body });
+      return fakeResponse(200, "application/json", JSON.stringify({ started: 1, skipped: 0 }));
+    },
+  });
+  context.loadRewardStatus = async () => {};
+  const html = context.card({ auth_index: "cn-1", region: "cn", service: "cn", checkin: { today_checked_in: false } });
+  for (const action of ["travel", "makeup", "lottery", "energy"]) {
+    assert.match(html, new RegExp(`data-reward-action="${action}"`));
+  }
+  context.api = async (path, opts) => {
+    calls.push({ url: String(path), body: opts && opts.body });
+    return { started: 1, skipped: 0 };
+  };
+  await context.runRewards("cn-1", { dataset: {}, innerHTML: "x", disabled: false }, ["makeup"]);
+  const run = calls.find(call => call.url.includes("/rewards/run"));
+  assert.deepEqual(JSON.parse(run.body).actions, ["makeup"]);
 });

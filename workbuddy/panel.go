@@ -286,7 +286,7 @@ func buildDashboardExWithCallback(force, fetchCredits bool, callbackID string) m
 		"active_auth":    activeID,
 		"checkin_auto":   auto,
 		"lifecycle_auto": lifecycleEnabled(),
-		"schedule":       []string{"09:00", "21:00"},
+		"schedule":       []string{"00:05", "01:05", "05:05", "09:05", "13:05", "17:05", "21:05"},
 		"server_time":    time.Now().Format("2006-01-02 15:04:05"),
 		"summary":        sum,
 		"model_status":   buildModelStatus(statusFiles),

@@ -5,9 +5,7 @@
 // inference call is rejected with TOKEN_EXPIRE. Refreshing daily (plus
 // PAT re-exchange fallback) keeps accounts alive automatically.
 //
-//   - Runs on the existing schedulerLoop at 22:00 local (keepaliveHours is
-//     separate from checkinHours so the two cadences can evolve independently).
-//     separate from checkinHours so the two cadences can evolve independently).
+//   - Runs on the existing schedulerLoop at 22:00 local (keepaliveHours).
 //   - Iterates all qoderwork auths via host.auth.list/get, calls
 //     {realm-base}/v2/plugin/auth/token/refresh with X-Refresh-Token via
 //     the host HTTP bridge (host.http.do).
@@ -30,8 +28,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
-// keepaliveHours is the daily refresh schedule (local time). Kept separate
-// from checkinHours so the two cadences can evolve independently.
+// keepaliveHours is the daily refresh schedule (local time).
 var keepaliveHours = []int{22}
 
 // keepaliveAuto gates the daily refresh. Default true; configurable via

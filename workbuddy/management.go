@@ -177,6 +177,10 @@ func managementRegistration() managementRegistrationResponse {
 			{Method: http.MethodGet, Path: base + "/accounts", Description: "List WorkBuddy accounts with credits, plan and check-in status."},
 			{Method: http.MethodGet, Path: base + "/egress-ip", Description: "Get the current egress IP through the active WorkBuddy HTTP route."},
 			{Method: http.MethodPost, Path: base + "/refresh", Description: "Force refresh quota/cache for all accounts."},
+			{Method: http.MethodGet, Path: base + "/rewards/status", Description: "Get CN reward run results and configuration."},
+			{Method: http.MethodPost, Path: base + "/rewards/run", Description: "Start an asynchronous CN reward run for one account or all."},
+			{Method: http.MethodGet, Path: base + "/rewards/config", Description: "Get persistent CN reward settings."},
+			{Method: http.MethodPost, Path: base + "/rewards/config", Description: "Update persistent CN reward settings."},
 			{Method: http.MethodPost, Path: base + "/checkin", Description: "Manually check in one account (auth_index) or all."},
 			{Method: http.MethodPost, Path: base + "/checkin/config", Description: "Toggle auto check-in (enabled: true/false)."},
 			{Method: http.MethodGet, Path: base + "/credits", Description: "Get real-time credits for one (auth_index query) or all accounts."},
@@ -246,6 +250,14 @@ func handleManagement(raw []byte) ([]byte, error) {
 		return okEnvelope(mgmtJSONResponse(http.StatusOK, map[string]any{"ip": ip}))
 	case req.Method == http.MethodPost && path == base+"/refresh":
 		return okEnvelope(mgmtJSONResponse(http.StatusOK, buildDashboardExWithCallback(true, true, req.HostCallbackID)))
+	case req.Method == http.MethodGet && path == base+"/rewards/status":
+		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleRewardsStatus()))
+	case req.Method == http.MethodPost && path == base+"/rewards/run":
+		return okEnvelope(mgmtJSONResponse(http.StatusAccepted, handleRewardsRun(req.ManagementRequest)))
+	case req.Method == http.MethodGet && path == base+"/rewards/config":
+		return okEnvelope(mgmtJSONResponse(http.StatusOK, rewardConfigJSON()))
+	case req.Method == http.MethodPost && path == base+"/rewards/config":
+		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleRewardConfig(req.ManagementRequest)))
 	case req.Method == http.MethodPost && path == base+"/checkin":
 		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleManualCheckinWithCallback(req.ManagementRequest, req.HostCallbackID)))
 	case req.Method == http.MethodPost && path == base+"/checkin/config":
@@ -382,7 +394,9 @@ func managementClientIP(req pluginapi.ManagementRequest) string {
 func mutatingManagementPath(path string) bool {
 	base := loadedManagementBasePath() + "/plugins/" + providerName
 	switch path {
-	case base + "/refresh",
+	case base + "/rewards/run",
+		base + "/rewards/config",
+		base + "/refresh",
 		base + "/checkin",
 		base + "/checkin/config",
 		base + "/import",

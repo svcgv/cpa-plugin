@@ -2,7 +2,7 @@
 
 [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) 的 **腾讯 CodeBuddy**
 （国内版 `copilot.tencent.com` + 国际版 `workbuddy.ai`）原生 OAuth 提供商插件：
-按账号动态发现模型、流式执行、积分感知调度、每日自动签到、内置管理面板。
+按账号动态发现模型、流式执行、积分感知调度、CN 每日签到与成长奖励、内置管理面板。
 
 [English → README.md](README.md)
 
@@ -24,15 +24,16 @@
 - **积分生命周期** — 账号耗尽时自动 `disabled` 并保留凭证，积分恢复后自动启用；
   只有确认所在服务**没有**签到活动（即额度为一次性 trial）的账号才会删除 auth 文件。
   能力或积分未知时不会删除。Executor 遇到硬积分错误立即触发 reconcile。
-- **每日签到（按能力）** — 插件先探测账号所在服务的签到活动，标记为
-  `supported` / `unsupported` / `unknown`。仅有活动的账号显示「签到」并在
-  09:00 / 21:00 自动签到；没有活动显示「不支持签到」；查询失败显示「状态未知」
-  但仍可手动尝试。CN 与外服账号都适用。
+- **CN 每日签到与成长奖励** — 仅对 CN 账号执行每日签到、旅行礼物、派 Buddy、
+  新任务与任务奖、断登补签、连登兑换、抽奖盲盒和能量开 Buddy。支持一键全领与分项操作；
+  自动开关可分别关闭。北京时间 00:05 签到并领取，01/05/09/13/17/21:05 继续补领。
+- **国际版隔离** — 两个国际服务的账号在本地筛选阶段直接跳过奖励、签到、补签、
+  额度刷新及奖励调度附带的维护操作。手动 `/checkin` 同样只返回本地跳过。
 - **Trial 领取** — 国际版（`workbuddy.ai`）账号可在面板领取一次性 250 积分专家加油包。
   CodeBuddy 国际版（`codebuddy.ai`）不显示该按钮。
 - **积分面板** — 内嵌面板 `/v0/resource/plugins/workbuddy/panel`，含积分
   进度条、套餐徽章、耗尽/禁用标记、CN/Global 筛选、凭证导入，以及按服务标注的
-  `CN` / `Global(CB)` / `Global(WB)` 徽章与按能力的签到按钮。
+  `CN` / `Global(CB)` / `Global(WB)` 徽章、CN 成长奖励按钮和领取记录。国际版不显示签到或奖励入口。
 - **调度器**（可选） — `scheduler_mode: credits` 让插件选中面板选中的账号；
   `off`（默认）完全交给 CPA 内置调度。
 - **Usage 上报** — 实现 `UsagePlugin` 能力，每条请求的 usage record 转发到
@@ -121,8 +122,26 @@ plugins:
       # fail closed，不会回退到 CPA 全局代理或直连。
       proxy-url: ""
 
-      # CN 账号每日自动签到（默认 true），09:00 和 21:00 本地时间。
+      # 旧版签到开关；只在没有 rewards.actions.checkin 时控制签到。
       checkin_auto: true
+
+      # 默认全部开启；国际版永不执行。account_key 从 /rewards/status 的
+      # accounts 映射获取，可在面板「奖励设置」中保存。
+      rewards:
+        auto: true
+        actions:
+          checkin: true
+          travel: true
+          tasks: true
+          makeup: true
+          redeem: true
+          lottery: true
+          energy: true
+        # accounts:
+        #   cn-<hash>:
+        #     auto: false
+        #     actions:
+        #       lottery: false
 
       # 积分生命周期：CN 耗尽禁用 / Global 耗尽删除 / CN 回血恢复（默认 true）。
       lifecycle_auto: true
@@ -147,7 +166,7 @@ plugins:
 模型 alias 和排除走 CPA 原生 `oauth-model-alias` 和 `oauth-excluded-models`
 配置，无需插件侧重复。
 
-设置 `proxy-url` 后，chat、billing/签到/trial、token refresh、
+设置 `proxy-url` 后，chat、billing/签到/成长奖励/trial、token refresh、
 `executor.http_request`、usage 上报、OAuth state/token/account 请求和 usage
 endpoint 探测都会使用该代理。CLIProxyAPI v7.2.30 的 native plugin host HTTP
 API 不支持单次请求覆盖代理，因此显式插件代理由插件自身发送，不会出现在
@@ -212,7 +231,7 @@ custom model source。新进程启动或 auth、token、plugin config generation
 
 ## 生命周期
 
-| 状态 | 有签到活动的账号 | 无签到活动（一次性 trial） |
+| 状态 | CN 账号 | 国际版账号 |
 |---|---|---|
 | 积分 > 0 | active | active |
 | 积分 = 0 | `disabled: true`（凭证保留） | auth 文件**删除** |

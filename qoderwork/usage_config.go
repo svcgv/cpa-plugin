@@ -5,16 +5,20 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
-// check-in schedule: 09:00 and 21:00 local time.
-var checkinHours = []int{9, 21}
+// Campaign rewards are scheduled by rewardSchedulerLoop in China time.
 
 // plugin-level config decoded from plugin.register/reconfigure config_yaml.
 var (
@@ -56,86 +60,113 @@ const fallbackUsageReportURL = "http://cpa-manager-plus:18317/v0/management/usag
 
 // configure decodes plugin config from the lifecycle request.
 func configure(raw []byte) {
-	// Parse config without holding any lock (fixes nested-lock hazard).
 	nextCheckinAuto := true
 	nextLifecycleAuto := true
-	nextSchedulerMode := schedulerModeOff // reset to default on reconfigure
+	nextSchedulerMode := schedulerModeOff
 	nextKeepaliveAuto := true
 	nextMgmtKey := ""
-
 	cfgURL, cfgKey := "", ""
+	var configYAML []byte
 	if len(raw) > 0 {
-		var req struct {
+		var request struct {
 			ConfigYAML []byte `json:"config_yaml"`
 		}
-		if err := json.Unmarshal(raw, &req); err == nil {
-			for _, line := range strings.Split(string(req.ConfigYAML), "\n") {
-				line = strings.TrimSpace(line)
-				if strings.HasPrefix(line, "checkin_auto:") {
-					v := strings.TrimSpace(strings.TrimPrefix(line, "checkin_auto:"))
-					nextCheckinAuto = v == "true" || v == "1" || v == "yes" || v == "on"
+		if err := json.Unmarshal(raw, &request); err == nil {
+			configYAML = request.ConfigYAML
+		}
+	}
+	root, err := parseQoderConfigRoot(configYAML)
+	if err != nil {
+		return
+	}
+	if root != nil {
+		for i := 0; i+1 < len(root.Content); i += 2 {
+			key, value := root.Content[i].Value, root.Content[i+1]
+			if key == "rewards" {
+				continue
+			}
+			if value.Kind != yaml.ScalarNode {
+				// A malformed scalar setting must be rejected rather than
+				// silently replaced with a default (which could re-enable
+				// automatic collection after a bad panel save).
+				switch key {
+				case "checkin_auto", "lifecycle_auto", "token_keepalive", "scheduler_mode", "usage_report_url", "usage_report_key", "management_key":
+					return
 				}
-				if strings.HasPrefix(line, "lifecycle_auto:") {
-					v := strings.TrimSpace(strings.TrimPrefix(line, "lifecycle_auto:"))
-					v = strings.Trim(v, "\"'")
-					nextLifecycleAuto = v == "true" || v == "1" || v == "yes" || v == "on"
+				continue
+			}
+			v := strings.ToLower(strings.TrimSpace(value.Value))
+			switch key {
+			case "checkin_auto":
+				nextCheckinAuto = qoderConfigEnabled(v)
+			case "lifecycle_auto":
+				nextLifecycleAuto = qoderConfigEnabled(v)
+			case "token_keepalive":
+				nextKeepaliveAuto = qoderConfigEnabled(v)
+			case "scheduler_mode":
+				if v == schedulerModeCredits {
+					nextSchedulerMode = schedulerModeCredits
 				}
-				if strings.HasPrefix(line, "scheduler_mode:") {
-					v := strings.TrimSpace(strings.TrimPrefix(line, "scheduler_mode:"))
-					v = strings.Trim(v, "\"'")
-					if v == schedulerModeCredits {
-						nextSchedulerMode = schedulerModeCredits
-					}
-				}
-				if strings.HasPrefix(line, "usage_report_url:") {
-					v := strings.TrimSpace(strings.TrimPrefix(line, "usage_report_url:"))
-					cfgURL = strings.Trim(v, "\"'")
-				}
-				if strings.HasPrefix(line, "usage_report_key:") {
-					v := strings.TrimSpace(strings.TrimPrefix(line, "usage_report_key:"))
-					cfgKey = strings.Trim(v, "\"'")
-				}
-				if strings.HasPrefix(line, "management_key:") {
-					v := strings.TrimSpace(strings.TrimPrefix(line, "management_key:"))
-					nextMgmtKey = strings.Trim(v, "\"'")
-				}
-				if strings.HasPrefix(line, "token_keepalive:") {
-					v := strings.TrimSpace(strings.TrimPrefix(line, "token_keepalive:"))
-					v = strings.Trim(v, "\"'")
-					nextKeepaliveAuto = v == "true" || v == "1" || v == "yes" || v == "on"
-				}
+			case "usage_report_url":
+				cfgURL = strings.TrimSpace(value.Value)
+			case "usage_report_key":
+				cfgKey = strings.TrimSpace(value.Value)
+			case "management_key":
+				nextMgmtKey = strings.TrimSpace(value.Value)
 			}
 		}
 	}
+	rewardCfg, err := parseRewardConfig(root)
+	if err != nil {
+		return
+	}
+	setRewardConfig(rewardCfg)
 
-	// Apply each setting under its own lock — no nesting.
 	checkinAutoMu.Lock()
 	checkinAuto = nextCheckinAuto
 	checkinAutoMu.Unlock()
-
 	lifecycleAutoMu.Lock()
 	lifecycleAuto = nextLifecycleAuto
 	lifecycleAutoMu.Unlock()
-
 	schedulerModeMu.Lock()
 	schedulerMode = nextSchedulerMode
 	schedulerModeMu.Unlock()
-
 	keepaliveAutoMu.Lock()
 	keepaliveAuto = nextKeepaliveAuto
 	keepaliveAutoMu.Unlock()
-
-	// management key: config_yaml > env > keep existing. Empty stays empty
-	// (plugin-layer auth disabled, host middleware still guards).
 	if nextMgmtKey == "" {
 		nextMgmtKey = strings.TrimSpace(os.Getenv("WB_MANAGEMENT_KEY"))
 	}
 	managementAPIKeyMu.Lock()
 	managementAPIKey = nextMgmtKey
 	managementAPIKeyMu.Unlock()
-
 	resolveUsageReport(cfgURL, cfgKey)
 	ensureScheduler()
+}
+
+func qoderConfigEnabled(value string) bool {
+	return value == "true" || value == "1" || value == "yes" || value == "on"
+}
+
+// parseQoderConfigRoot keeps Qoder's config parser structured so account
+// overrides are not lost or partially interpreted by a line scanner.
+func parseQoderConfigRoot(raw []byte) (*yaml.Node, error) {
+	if strings.TrimSpace(string(raw)) == "" {
+		return nil, nil
+	}
+	var document yaml.Node
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
+	if err := decoder.Decode(&document); err != nil {
+		return nil, errors.New("invalid config_yaml")
+	}
+	var extra yaml.Node
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return nil, errors.New("config_yaml must contain exactly one document")
+	}
+	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
+		return nil, errors.New("config_yaml must be a mapping")
+	}
+	return document.Content[0], nil
 }
 
 // resolveUsageReport fills usageReportURL/key from config → env → secret files.

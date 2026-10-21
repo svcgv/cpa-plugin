@@ -33,12 +33,14 @@ built-in management dashboard.
   only when its service is confirmed to have no check-in activity, making its
   quota a one-shot trial. Unknown capability or unknown credits never delete.
   Hard credit errors from the executor trigger an immediate reconcile.
-- **Daily check-in (capability-based)** — the plugin probes each account's
-  service for a check-in activity and reports `supported` / `unsupported` /
-  `unknown`. Only accounts with an activity are offered 签到 and checked in
-  automatically at 09:00 and 21:00 local time (configurable); others show
-  "unsupported", and an inconclusive probe still allows a manual attempt.
-  Per-account mutexes prevent duplicate claims from racing browser tabs.
+- **CN daily check-in and growth rewards** — CN accounts can collect check-in,
+  travel gifts, Buddy departures, task acceptance and rewards, missed-day makeup,
+  streak redemption, lottery boxes, and energy-powered Buddy boxes. The panel
+  offers one-click and per-action execution with persistent global and
+  per-account switches. Runs at 00:05 China time and polls at 01/05/09/13/17/21:05.
+- **International isolation** — both international services are rejected locally
+  before any reward probe, claim, makeup, quota refresh, or scheduled maintenance.
+  The legacy `/checkin` route also returns a local skip for them.
 - **Trial claim** — 国际版 accounts (`workbuddy.ai`) can claim the one-time
   250-credit expert trial pack from the panel. CodeBuddy 国际版 (`codebuddy.ai`)
   does not offer this button.
@@ -142,9 +144,23 @@ plugins:
       # proxy failures fail closed and never fall back to CPA or a direct route.
       proxy-url: ""
 
-      # Daily check-in automation for CN accounts (default true).
-      # Runs at 09:00 and 21:00 local time.
+      # Legacy switch; controls the check-in action only when
+      # rewards.actions.checkin is absent.
       checkin_auto: true
+
+      # All actions default on. International accounts are never touched.
+      # Use the panel's reward settings dialog or GET /rewards/status for
+      # the stable account_key values.
+      rewards:
+        auto: true
+        actions:
+          checkin: true
+          travel: true
+          tasks: true
+          makeup: true
+          redeem: true
+          lottery: true
+          energy: true
 
       # Credit lifecycle: disable CN on exhaust, delete Global on exhaust,
       # re-enable CN after check-in restores credits (default true).

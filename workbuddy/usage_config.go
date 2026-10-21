@@ -18,8 +18,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// check-in schedule: 09:00 and 21:00 local time.
-var checkinHours = []int{9, 21}
+// CN check-in is scheduled in China time by rewardSchedulerLoop
+// (00:05 + four-hour polling).
 
 // plugin-level config decoded from plugin.register/reconfigure config_yaml.
 var (
@@ -108,6 +108,11 @@ func configure(raw []byte) error {
 		proxyState.Store(&proxyRoutingState{mode: proxyModeBlocked})
 		return err
 	}
+	rewardCfg, err := parseRewardConfig(configRootForConfig(configYAML))
+	if err != nil {
+		proxyState.Store(&proxyRoutingState{mode: proxyModeBlocked})
+		return err
+	}
 	nextFeatures, err := parseFeatureRuntime(configYAML)
 	if err != nil {
 		return err
@@ -117,6 +122,7 @@ func configure(raw []byte) error {
 	}
 
 	// Apply each setting under its own lock — no nesting.
+	setRewardConfig(rewardCfg)
 	checkinAutoMu.Lock()
 	checkinAuto = nextCheckinAuto
 	checkinAutoMu.Unlock()
@@ -215,6 +221,11 @@ func nodeStartsWithNonSpecificTag(node *yaml.Node, lines []string) bool {
 		return false
 	}
 	return column+1 == len(line) || line[column+1] == ' ' || line[column+1] == '\t'
+}
+
+func configRootForConfig(raw []byte) *yaml.Node {
+	root, _ := parseValidatedConfigRoot(raw)
+	return root
 }
 
 func parseTopLevelConfigScalars(raw []byte) (map[string]string, error) {

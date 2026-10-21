@@ -180,7 +180,7 @@ button .spin{border-color:var(--on-acc);border-top-color:transparent}
 <body>
 <div class="wrap">
   <h1>QoderWork 账号面板</h1>
-  <div class="sub">积分余额 · CN 每日签到（09:00/21:00）· 耗尽自动关</div>
+  <div class="sub">积分余额 · CN 每日 Credits 活动（北京时间 10:00 刷新）· 国际版不执行奖励 · 耗尽自动关</div>
   <div id="authBox" class="card" style="display:none;margin-bottom:16px">
     <div style="margin-bottom:8px;color:var(--mut)">需要管理密钥（management key）才能访问账号数据。从 CPA 主面板嵌入时会自动获取，无需输入。错误密钥请勿连点，避免 IP 封禁。</div>
     <div style="display:flex;gap:8px">
@@ -192,9 +192,11 @@ button .spin{border-color:var(--on-acc);border-top-color:transparent}
     <button id="addAccountBtn" onclick="openAddModal()">OAuth 登录</button>
     <button class="sec" id="importBtn" onclick="openImportModal()">导入 PAT</button>
     <button id="refreshBtn" onclick="load(true,this)">刷新数据</button>
-    <button class="sec" onclick="checkinAll(this)">全部签到</button>
+    <button class="sec" onclick="runRewards('',this)">一键领取全部</button>
+    <button class="sec" onclick="openRewardSettings()">奖励设置</button>
     
-    <label class="toggle" title="仅 CN 账号 09:00 / 21:00"><input type="checkbox" id="autoToggle" onchange="toggleAuto(this.checked)"> 自动签到(CN)</label>
+    <label class="toggle" title="仅 CN：北京时间 10:05 / 11:05 / 15:05 / 19:05 / 23:05"><input type="checkbox" id="autoToggle" onchange="toggleRewardAuto(this.checked)"> 自动领取(CN)</label>
+    <span class="toggle" id="rewardActionBar"></span>
     <span class="toggle" id="svtime"></span>
   </div>
   <div class="filter-bar" id="filterBar">
@@ -204,6 +206,7 @@ button .spin{border-color:var(--on-acc);border-top-color:transparent}
     
     <button type="button" class="ftag" data-region="exhausted" onclick="filterRegion('exhausted',this)">耗尽 <span class="cnt" id="cntExhausted">0</span></button>
   </div>
+  <details class="card" style="margin-bottom:16px"><summary>每日奖励领取记录</summary><div id="rewardResults" role="status" style="white-space:pre-wrap;overflow-wrap:anywhere">尚未执行</div></details>
   <div class="summary card" id="summaryBox" style="display:none"></div>
   <div id="grid" class="grid"><div class="loading">加载中…</div></div>
 </div>
@@ -242,6 +245,15 @@ button .spin{border-color:var(--on-acc);border-top-color:transparent}
       <button type="button" class="sec" onclick="closeImportModal()">取消</button>
       <button type="button" onclick="importAuth(this)">导入并保存</button>
     </div>
+  </div>
+</div>
+<div class="modal-mask" id="rewardSettingsModal" onclick="onRewardMaskClick(event)">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="rewardSettingsTitle">
+    <div class="modal-hd"><h2 id="rewardSettingsTitle">每日奖励设置</h2>
+      <button type="button" class="modal-x" onclick="closeRewardSettings()" aria-label="关闭">×</button></div>
+    <div class="modal-bd" id="rewardSettingsBody"></div>
+    <div class="modal-ft"><button type="button" class="sec" onclick="closeRewardSettings()">取消</button>
+      <button type="button" onclick="saveRewardSettingsDialog(this)">保存</button></div>
   </div>
 </div>
 <div class="toasts" id="toasts"></div>
@@ -318,13 +330,6 @@ function busy(btn, on){
 }
 // Immediate UI: mark a check-in button as done so user doesn't see "签到" flash
 // while load() re-fetches (which can take seconds).
-function markCheckinDone(btn){
-  if(!btn)return;
-  btn.disabled=true;
-  btn.className="done";
-  btn.innerHTML="已签到";
-  btn.dataset.orig="已签到";
-}
 function fmtRemain(c){if(!c)return "-";const t=(c.total_remain||0)+(c.total_used||0);return c.total_remain+" 余 / "+t+" 总"}
 function esc(s){return (s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function progressHTML(c){
@@ -346,7 +351,7 @@ function bindCardActions(root){
     btn.addEventListener("click", ev=>{
       const act=ev.currentTarget.dataset.action;
       const idx=ev.currentTarget.dataset.authIndex;
-      if(act==="checkin") checkin(idx, ev.currentTarget);
+      if(act==="rewards") runRewards(idx, ev.currentTarget);
       else if(act==="select") selectAuth(idx, ev.currentTarget);
       else if(act==="refresh") refreshCredits(idx, ev.currentTarget);
       else if(act==="claim-pro") claimPro(idx, ev.currentTarget);
@@ -373,7 +378,7 @@ function card(a){
     const btnClass=checked?"done":(ciActive?"sec":"done");
     const btnText=checked?"已签到":(ciActive?"签到":"不可签");
     const btnDisabled=(checked||!ciActive)?" disabled=\"disabled\"":"";
-    actionHTML=`<button class="${btnClass}" data-action="checkin" data-auth-index="${esc(a.auth_index)}"${btnDisabled}>${btnText}</button>`+
+    actionHTML=`<button class="${btnClass}" data-action="rewards" data-auth-index="${esc(a.auth_index)}"${btnDisabled}>${checked?"已领取":"每日奖励"}</button>`+
       `<button class="sec" data-action="claim-pro" data-auth-index="${esc(a.auth_index)}" title="领取Pro升级包">领取Pro</button>`;
   }
   const selectBtn=selected
@@ -647,7 +652,6 @@ async function load(force, btn){
     const d = force
       ? await api("/refresh", {method:"POST"})
       : await api("/accounts");
-    const at=document.getElementById("autoToggle"); if(at) at.checked=!!d.checkin_auto;
     const st=document.getElementById("svtime"); if(st) st.textContent=d.server_time?("服务器时间 "+d.server_time):"";
     if(d.error){
       g.innerHTML='<div class="loading">'+esc(d.error)+"</div>";
@@ -689,52 +693,6 @@ async function load(force, btn){
     if(force) busy(btn, false);
   }
 }
-function checkinResultToast(res, who){
-  const name=res.nickname||who||"账号";
-  if(res.error){toast(name+"：签到失败","err",res.error);return}
-  if(res.reason==="global"||(/国际版|不支持/.test(String(res.message||"")))){
-    toast(name+"：国际版无需签到","warn",res.message||"请用领取专家加油包");return;
-  }
-  if(res.reason==="already"||(res.skipped&&/already|已签|今日/.test(String(res.message||"")))){
-    toast(name+"：今日已签到","ok",res.message||"");return;
-  }
-  if(res.success){toast(name+"：签到成功","ok","+"+(res.credit??res.daily_credit??"")+" 积分 · 连续 "+(res.streak_days??"?")+" 天");return}
-  toast(name+"："+(res.message||"未知结果"),"warn");
-}
-function isCheckinDoneResult(res){
-  if(!res||res.error) return false;
-  if(res.reason==="global") return false;
-  if(res.success) return true;
-  const msg=String(res.message||"");
-  // already checked in today (backend) — treat as done, not failure
-  if(/already|已签|今日/.test(msg) && !/国际版|不支持/.test(msg)) return true;
-  return false;
-}
-async function checkin(idx, btn){
-  busy(btn,true);
-  try{
-    const d=await api("/checkin",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({auth_index:idx})});
-    const res=(d.results||[])[0]||{};
-    checkinResultToast(res);
-    if(isCheckinDoneResult(res)){
-      // Instant UI — do NOT busy(false) which restores "签到" before load finishes
-      markCheckinDone(btn);
-      // Optimistic local state so partial re-renders stay correct
-      const a=(lastAccounts||[]).find(x=>x.auth_index===idx);
-      if(a){
-        a.checkin=Object.assign({}, a.checkin||{}, {today_checked_in:true});
-      }
-    }else{
-      busy(btn,false);
-    }
-    // Await reload so card matches server; cache was cleared on backend for this account
-    // Use force=true so credits are re-fetched from upstream (not stale cache).
-    await load(true);
-  }catch(e){
-    toast("签到请求失败","err",e.message);
-    busy(btn,false);
-  }
-}
 async function claimPro(idx, btn){
   busy(btn,true);
   try{
@@ -760,7 +718,7 @@ async function selectAuth(idx, btn){
     }
     activeAuthId=d.active_auth||idx;
     const who=d.nickname||idx;
-    const region=(res&&res.region==="intl")?"国际版":"CN";
+    const region=(d.region==="intl")?"国际版":"CN";
     toast("已选用","ok",who+" · "+region);
     // Re-render from local state for instant feedback, then soft reload
     (lastAccounts||[]).forEach(a=>{a.selected=(a.auth_index===activeAuthId);});
@@ -804,54 +762,106 @@ async function refreshCredits(idx, btn){
     busy(btn,false);
   }
 }
-async function checkinAll(btn){
+let rewardStatusCache=null;
+let rewardPollTimer=null;
+function renderRewardStatus(d){
+  rewardStatusCache=d;
+  const at=document.getElementById("autoToggle");
+  if(at&&"checked" in at) at.checked=!!d.auto;
+  const bar=document.getElementById("rewardActionBar");
+  if(bar&&"textContent" in bar) bar.textContent="每日奖励"+(d.actions&&d.actions.checkin?" ✓":" ✕");
+  const el=document.getElementById("rewardResults");
+  if(!el) return;
+  el.textContent=(d.results||[]).map(r=>
+    (r.nickname||r.name||r.auth_index)+(r.running?" · 执行中":r.success?" · 完成":" · 部分步骤失败")+
+    (r.needs_attention?" · 需要处理":"")+(r.credits_gained?" · +"+r.credits_gained+" Credits":"")+
+    (r.finished_at?" · "+r.finished_at:"")+"\n"+
+    (r.steps||[]).map(s=>"  "+s.action+" · "+s.status+" · "+s.message).join("\n")
+  ).join("\n\n")||"尚未执行";
+}
+async function loadRewardStatus(){
+  clearTimeout(rewardPollTimer);
+  try{
+    const d=await api("/rewards/status");
+    if(d.error) throw new Error(d.error);
+    renderRewardStatus(d);
+    if((d.results||[]).some(r=>r.running)) rewardPollTimer=setTimeout(loadRewardStatus,3000);
+  }catch(e){const el=document.getElementById("rewardResults");if(el)el.textContent="奖励记录查询失败："+e.message;}
+}
+async function runRewards(idx,btn){
   busy(btn,true);
   try{
-    // Backend prefilters: already-checked skipped; only CN-need-checkin run.
-    const d=await api("/checkin",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
-    const rs=d.results||[];
-    const s=d.summary||{};
-    const ok=Number(s.success??rs.filter(x=>x.success&&x.reason!=="already"&&!x.skipped).length)||0;
-    const already=Number(s.already??rs.filter(x=>isCheckinDoneResult(x)&&(x.reason==="already"||x.skipped||!x.success)).length)||0;
-    const fail=Number(s.fail??rs.filter(x=>x.error).length)||0;
-    const skippedCN=Number(s.skipped_cn||0);
-    const eligible=Number(s.eligible??(ok+fail))||0;
-    const detailParts=[];
-    
-    if(already) detailParts.push("今日已签 "+already);
-    if(eligible) detailParts.push("待签 "+eligible);
-    const detail=detailParts.join(" · ");
-    if(d.error){toast("批量签到失败","err",d.error)}
-    else if(fail){
-      const errDetail=rs.filter(x=>x.error).map(x=>(x.nickname||"")+": "+x.error).join("；");
-      toast("批量签到："+ok+" 成功 / "+fail+" 失败"+(already?" / "+already+" 已签":""),"err",errDetail||detail);
-    }else if(ok){
-      toast("批量签到："+ok+" 成功"+(already?" / "+already+" 今日已签":""),"ok",detail);
-    }else if(already||skippedCN){
-      toast("无需签到","ok",detail||"CN 今日已签");
-    }else if(!rs.length && !eligible){
-      toast("没有需要签到的 CN 账号","warn",detail||"");
-    }else{
-      toast("没有需要签到的账号","warn",detail);
-    }
-    // Mark CN check-in buttons done immediately when any success/already
-    if(ok||already){
-      document.querySelectorAll("#grid .card").forEach(c=>{
-        if((c.dataset.region||"cn")==="cn"){
-          const b=c.querySelector('[data-action="checkin"]');
-          if(b && /签到|处理中/.test(b.textContent||"")) markCheckinDone(b);
-        }
-      });
-    }
-    await load(true);
-  }catch(e){toast("批量签到失败","err",e.message)}
-  // load() re-renders grid; only restore toolbar button
-  busy(btn,false);
+    const d=await api("/rewards/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({auth_index:idx})});
+    if(d.error)throw new Error(d.error);
+    toast("每日奖励已排队","ok",d.started+" 个 CN 账号已开始；国际版已跳过（"+d.skipped+"）");
+    await loadRewardStatus();
+  }catch(e){toast("领取失败","err",e.message)}finally{busy(btn,false)}
 }
-
-
-async function toggleAuto(on){
-  try{const d=await api("/checkin/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:on})});toast("自动签到已"+(d.checkin_auto?"开启 ✅":"关闭 ⏸"),"ok")}catch(e){toast("设置失败","err",e.message)}
+async function saveRewardSettings(payload,waitFor){
+  const r=await fetch("/v0/management/plugins/qoderwork/config",{method:"PATCH",credentials:"omit",headers:{"Content-Type":"application/json",...(authHeaders(getKey()))},body:JSON.stringify({rewards:payload})});
+  if(!r.ok) throw new Error("配置保存失败（HTTP "+r.status+"）");
+  for(let i=0;i<20;i++){
+    const d=await api("/rewards/status");
+    if(!d.error&&waitFor(d)){renderRewardStatus(d);return d;}
+    await new Promise(resolve=>setTimeout(resolve,100));
+  }
+  throw new Error("设置已写入，但运行时尚未生效");
+}
+async function toggleRewardAuto(on){
+  try{
+    const accounts=Object.assign({},(rewardStatusCache&&rewardStatusCache.config_accounts)||{});
+    await saveRewardSettings({auto:on,actions:Object.assign({},rewardStatusCache&&rewardStatusCache.actions||{}),accounts},d=>d.auto===on);
+    toast("自动领取已"+(on?"开启":"关闭"),"ok","北京时间 10:05 / 11:05 / 15:05 / 19:05 / 23:05");
+  }catch(e){const at=document.getElementById("autoToggle");if(at)at.checked=!on;toast("设置失败","err",e.message)}
+}
+function openRewardSettings(){
+  const d=rewardStatusCache||{};
+  const accounts=Object.keys(d.accounts||{}).map(key=>{
+    const row=d.accounts[key]||{};
+    const settings=row.settings||{auto:true,actions:{}};
+    const explicit=!!(d.config_accounts&&d.config_accounts[key]);
+    return `<div class="card" style="padding:12px;margin-top:10px" data-account-row="${esc(key)}">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <strong>${esc(row.nickname||row.name||key)}</strong>
+        <label class="toggle"><input type="checkbox" data-follow-global="${esc(key)}" ${explicit?"":"checked"}> 跟随全局</label>
+      </div>
+      <div data-account-custom="${esc(key)}" style="margin-top:8px;${explicit?"":"display:none"}">
+        <label class="toggle"><input type="checkbox" data-account-auto="${esc(key)}" ${settings.auto?"checked":""}> 自动领取</label>
+        <label class="toggle" style="margin-top:6px"><input type="checkbox" data-account-checkin="${esc(key)}" ${settings.actions&&settings.actions.checkin?"checked":""}> 每日 Credits 活动</label>
+      </div>
+    </div>`;
+  }).join("");
+  document.getElementById("rewardSettingsBody").innerHTML=`<p class="hint">仅 CN 账号执行。领取接口幂等，重复运行只查询；国际版永不执行。</p>
+    <label class="toggle"><input type="checkbox" id="rewardSettingsAuto" ${d.auto?"checked":""}> 自动领取</label>
+    <label class="toggle" style="margin-top:8px"><input type="checkbox" id="rewardSettingsCheckin" ${d.actions&&d.actions.checkin?"checked":""}> 每日 Credits 活动</label>
+    <h3 style="font-size:14px;margin:16px 0 4px">CN 账号覆盖</h3>${accounts||'<p class="hint">暂无 CN 账号</p>'}`;
+  document.querySelectorAll("[data-follow-global]").forEach(cb=>{
+    cb.addEventListener("change",()=>{
+      const box=document.querySelector(`[data-account-custom="${CSS.escape(cb.dataset.followGlobal)}"]`);
+      if(box) box.style.display=cb.checked?"none":"block";
+    });
+  });
+  document.getElementById("rewardSettingsModal").classList.add("show");
+}
+function closeRewardSettings(){document.getElementById("rewardSettingsModal").classList.remove("show")}
+function onRewardMaskClick(e){if(e.target===document.getElementById("rewardSettingsModal"))closeRewardSettings()}
+async function saveRewardSettingsDialog(btn){
+  const payload={auto:document.getElementById("rewardSettingsAuto").checked,actions:{checkin:document.getElementById("rewardSettingsCheckin").checked},accounts:{}};
+  document.querySelectorAll("[data-follow-global]").forEach(cb=>{
+    const key=cb.dataset.followGlobal;
+    if(cb.checked) return;
+    const row=document.querySelector(`[data-account-row="${CSS.escape(key)}"]`);
+    const autoBox=row&&row.querySelector("[data-account-auto]");
+    const checkinBox=row&&row.querySelector("[data-account-checkin]");
+    payload.accounts[key]={auto:!!(autoBox&&autoBox.checked),actions:{checkin:!!(checkinBox&&checkinBox.checked)}};
+  });
+  busy(btn,true);
+  try{
+    await saveRewardSettings(payload,d=>d.auto===payload.auto&&!!(d.actions&&d.actions.checkin)===payload.actions.checkin);
+    closeRewardSettings();
+    toast("奖励设置已保存","ok","重启后仍会保留");
+    loadRewardStatus();
+  }catch(e){toast("保存奖励设置失败","err",e.message)}finally{busy(btn,false)}
 }
 /* ---------------------------------------------------------------------------
    OAuth login dialog (CN device authorization).
@@ -1018,11 +1028,13 @@ document.getElementById("keyInput").addEventListener("keydown",e=>{if(e.key==="E
 document.addEventListener("keydown",e=>{
   if(e.key=="Escape"&&document.getElementById("addModal").classList.contains("show")) closeAddModal();
   if(e.key=="Escape"&&document.getElementById("importModal").classList.contains("show")) closeImportModal();
+  if(e.key=="Escape"&&document.getElementById("rewardSettingsModal").classList.contains("show")) closeRewardSettings();
 });
 /* Start theme sync watcher (parent MutationObserver + standalone prefers-color-scheme listener). */
 if(window.__wbThemeSync)window.__wbThemeSync();
 if(getKey()){
   load(false);
+  loadRewardStatus();
 }else{
   showAuth();
 }

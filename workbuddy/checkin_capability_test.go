@@ -247,7 +247,7 @@ func TestCheckinOneAccountSkipsUnsupportedWithoutCallingDailyCheckin(t *testing.
 	})
 	defer srv.Close()
 
-	sa := &storedAuth{Auth: storedTokens{Domain: "www.codebuddy.ai"}, Account: storedAccount{UID: "u1"}}
+	sa := &storedAuth{Auth: storedTokens{Domain: "www.codebuddy.cn"}, Account: storedAccount{UID: "u1"}}
 	res := checkinAccountAgainstServer(t, sa, srv)
 	if dailyCalls != 0 {
 		t.Fatalf("daily-checkin called %d times for an unsupported account", dailyCalls)

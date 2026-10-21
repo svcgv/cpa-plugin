@@ -118,8 +118,12 @@ func managementRegistration() managementRegistrationResponse {
 		Routes: []managementRoute{
 			{Method: http.MethodGet, Path: base + "/accounts", Description: "List QoderWork accounts with credits, plan and check-in status."},
 			{Method: http.MethodPost, Path: base + "/refresh", Description: "Force refresh quota/cache for all accounts."},
-			{Method: http.MethodPost, Path: base + "/checkin", Description: "Manually check in one account (auth_index) or all."},
-			{Method: http.MethodPost, Path: base + "/checkin/config", Description: "Toggle auto check-in (enabled: true/false)."},
+			{Method: http.MethodPost, Path: base + "/checkin", Description: "Compatibility check-in entry; CN only, uses the shared reward runner."},
+			{Method: http.MethodGet, Path: base + "/rewards/status", Description: "Get CN reward results and configuration."},
+			{Method: http.MethodPost, Path: base + "/rewards/run", Description: "Start an asynchronous CN reward run for one account or all."},
+			{Method: http.MethodGet, Path: base + "/rewards/config", Description: "Get persistent CN reward settings."},
+			{Method: http.MethodPost, Path: base + "/rewards/config", Description: "Update persistent CN reward settings."},
+			{Method: http.MethodPost, Path: base + "/checkin/config", Description: "Compatibility toggle for CN auto check-in (enabled: true/false)."},
 			{Method: http.MethodGet, Path: base + "/credits", Description: "Get real-time credits for one (auth_index query) or all accounts."},
 			{Method: http.MethodPost, Path: base + "/import", Description: "Import a QoderWork PAT (pt-...) by exchanging it for a jobToken pair and persisting."},
 			{Method: http.MethodPost, Path: base + "/login/start", Description: "Start the panel device-authorization login (CN). Returns the authorization URL and a session id."},
@@ -178,6 +182,14 @@ func handleManagement(raw []byte) ([]byte, error) {
 		return okEnvelope(mgmtJSONResponse(http.StatusOK, buildDashboardEx(true, true)))
 	case req.Method == http.MethodPost && path == base+"/checkin":
 		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleManualCheckin(req)))
+	case req.Method == http.MethodGet && path == base+"/rewards/status":
+		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleRewardsStatus()))
+	case req.Method == http.MethodPost && path == base+"/rewards/run":
+		return okEnvelope(mgmtJSONResponse(http.StatusAccepted, handleRewardsRun(req)))
+	case req.Method == http.MethodGet && path == base+"/rewards/config":
+		return okEnvelope(mgmtJSONResponse(http.StatusOK, rewardConfigJSON()))
+	case req.Method == http.MethodPost && path == base+"/rewards/config":
+		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleRewardConfig(req)))
 	case req.Method == http.MethodPost && path == base+"/checkin/config":
 		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleCheckinConfig(req)))
 	case req.Method == http.MethodGet && path == base+"/credits":
@@ -326,6 +338,8 @@ func mutatingManagementPath(path string) bool {
 	base := loadedManagementBasePath() + "/plugins/" + providerName
 	switch path {
 	case base + "/refresh",
+		base + "/rewards/run",
+		base + "/rewards/config",
 		base + "/checkin",
 		base + "/checkin/config",
 		base + "/import",

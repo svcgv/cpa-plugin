@@ -26,6 +26,7 @@ func ensureScheduler() {
 	}
 	schedulerStop = make(chan struct{})
 	go schedulerLoop(schedulerStop)
+	go rewardSchedulerLoop(schedulerStop)
 }
 
 // Note: there is deliberately no stopCheckinScheduler. The plugin shutdown
@@ -44,150 +45,25 @@ func scheduledInCurrentHour(now time.Time, hours []int) bool {
 }
 
 func scheduledActionsFor(now time.Time) (runCheckin, runKeepalive bool) {
-	return scheduledInCurrentHour(now, checkinHours), scheduledInCurrentHour(now, keepaliveHours)
+	// The live scheduler uses rewardSchedulerLoop for China-time rewards and
+	// only calls this helper for stale-call compatibility.
+	return false, scheduledInCurrentHour(now, keepaliveHours)
 }
 
-func nextCheckinTime(now time.Time) time.Time {
-	var earliest time.Time
-	// Consider both checkin and keepalive schedules so the timer wakes up for
-	// whichever fires first (e.g. 21:00 checkin vs 22:00 keepalive → 21:00 wins,
-	// then 22:00 keepalive fires on the next tick).
-	hours := append([]int{}, checkinHours...)
-	hours = append(hours, keepaliveHours...)
-	for _, h := range hours {
-		t := time.Date(now.Year(), now.Month(), now.Day(), h, 0, 0, 0, now.Location())
-		if !t.After(now) {
-			t = t.Add(24 * time.Hour) // slot already passed today → tomorrow
-		}
-		if earliest.IsZero() || t.Before(earliest) {
-			earliest = t
-		}
-	}
-	return earliest
-}
-
+// nextKeepaliveTime is defined in keepalive.go; check-in and growth are
+// scheduled only by rewardSchedulerLoop in China time.
 func schedulerLoop(stop chan struct{}) {
 	for {
-		next := nextCheckinTime(time.Now())
-		timer := time.NewTimer(time.Until(next))
+		timer := time.NewTimer(time.Until(nextKeepaliveTime(time.Now())))
 		select {
 		case <-stop:
 			timer.Stop()
 			return
 		case <-timer.C:
-			runCheckin, runKeepalive := scheduledActionsFor(time.Now())
-			if runCheckin {
-				runAutoCheckin()
-			}
-			if runKeepalive {
+			if keepaliveEnabled() && shouldRunKeepaliveNow(time.Now()) {
 				runTokenKeepalive()
 			}
 		}
-	}
-}
-
-// runAutoCheckin is the scheduled lifecycle tick (09:00 / 21:00).
-// CN: optional daily check-in, then reconcile (disable exhausted / reenable after credits).
-// Global: no auto trial (one-shot claim is manual only); reconcile may delete exhausted auths.
-//
-// v0.6.31: per-account work runs concurrently (sem=4) — was serial, so N accounts
-// meant 3N serial HTTP round-trips on the billing API. Matches the pattern used
-// by buildDashboardEx and handleManualCheckin.
-func runAutoCheckin() {
-	checkinAutoMu.RLock()
-	doCheckin := checkinAuto
-	checkinAutoMu.RUnlock()
-	// Lifecycle may still run when check-in is off (credit gate).
-	if !doCheckin && !lifecycleEnabled() {
-		return
-	}
-	files, err := hostAuthList()
-	if err != nil {
-		return
-	}
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 4)
-	for _, f := range files {
-		f := f
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			processAutoCheckinAccount(f, doCheckin)
-		}()
-	}
-	wg.Wait()
-}
-
-// processAutoCheckinAccount handles one account's scheduled tick. Extracted so
-// runAutoCheckin can fan out per-account work without duplicating logic.
-func processAutoCheckinAccount(f pluginapi.HostAuthFileEntry, doCheckin bool) {
-	// A-24: only fetch sa when needed (checkin). For lifecycle-only paths,
-	// let reconcileOneAccount do the single hostAuthGetBundle internally.
-	if doCheckin {
-		sa, err := hostAuthGet(f.AuthIndex)
-		if err != nil {
-			return
-		}
-		withCheckinLock(f.AuthIndex, func() {
-			// Auto check-in is opt-in per account: only an account that
-			// positively reported a running activity is claimed. Unsupported
-			// accounts are skipped, and an inconclusive probe is never used to
-			// justify a write against a real account on a timer.
-			probe := checkinCapabilityProbe(sa, "")
-			if probe.Summary != nil {
-				probe.Summary.Capability = string(probe.Capability)
-				probe.Summary.CapabilityNote = probe.Message
-			}
-			ci := probe.Summary
-			if probe.Capability == capabilitySupported && ci != nil && !ci.TodayCheckedIn {
-				res, callErr := performCheckinCall(sa)
-				if callErr == nil && res["success"] == true {
-					// Refresh once after a successful checkin call so cache reflects
-					// the post-call state. If the status call fails keep the pre-call
-					// snapshot rather than dropping it (v0.6.31: avoid shadowing ci
-					// with a second fetch that could race with concurrent readers).
-					if ci2, _ := fetchCheckinStatus(sa); ci2 != nil {
-						ci = ci2
-					}
-					// P1-5: checkin grants new credits — refresh the credits cache
-					// immediately so the panel shows the updated balance without
-					// waiting for the async reconcile pass.
-					if cr2, crErr := fetchUserResource(sa); crErr == nil && cr2 != nil {
-						if v, ok := accountCache.Load(f.ID); ok {
-							if prev, ok2 := v.(*accountCacheEntry); ok2 {
-								fresh := *prev
-								fresh.credits = cr2
-								fresh.fetched = time.Now()
-								accountCache.Store(f.ID, &fresh)
-							}
-						}
-					}
-				}
-			}
-			// Refresh cache with latest checkin status (merge, don't wipe credits/plan).
-			if ci != nil {
-				var prev *accountCacheEntry
-				if v, ok := accountCache.Load(f.ID); ok {
-					prev, _ = v.(*accountCacheEntry)
-				}
-				entry := &accountCacheEntry{checkin: ci, fetched: time.Now()}
-				if prev != nil {
-					entry.credits = prev.credits
-					entry.plan = prev.plan
-				}
-				accountCache.Store(f.ID, entry)
-			}
-		})
-		if lifecycleEnabled() {
-			_, _ = reconcileOneAccount(f.AuthIndex, f.ID, true)
-		}
-		return
-	}
-	// Lifecycle-only (checkin off): reconcile handles its own get.
-	if lifecycleEnabled() {
-		_, _ = reconcileOneAccount(f.AuthIndex, f.ID, true)
 	}
 }
 
@@ -316,97 +192,88 @@ var checkinHostAuthGet = hostAuthGet
 
 func checkinOneAccountWithCallback(f pluginapi.HostAuthFileEntry, callbackID string) map[string]any {
 	out := map[string]any{"auth_index": f.AuthIndex}
-
 	sa, err := checkinHostAuthGet(f.AuthIndex)
 	if err != nil {
 		out["error"] = err.Error()
 		return out
 	}
 	out["nickname"] = sa.Account.Nickname
-
-	mu := checkinLockFor(f.AuthIndex)
-	mu.Lock()
-	defer mu.Unlock()
-
-	// Status probe: a failure here is NOT fatal — the check-in call below is
-	// idempotent upstream and its business message tells us "already" anyway.
-	probe := checkinCapabilityProbe(sa, callbackID)
-	if probe.Summary != nil {
-		probe.Summary.Capability = string(probe.Capability)
-		probe.Summary.CapabilityNote = probe.Message
-	}
-	switch probe.Capability {
-	case capabilityUnsupported:
-		// Every candidate endpoint answered and none exposes an activity for
-		// this account. Do not call daily-checkin: it would only produce a
-		// confusing upstream error.
-		mergeCheckinCache(f.ID, &checkinSummary{
-			Capability:     string(capabilityUnsupported),
-			CapabilityNote: probe.Message,
-		})
-		out["success"] = false
-		out["skipped"] = true
-		out["reason"] = "unsupported"
-		out["message"] = probe.Message
-		return out
-	case capabilityUnknown:
-		// Auth / transport / rate-limit failure. The upstream check-in call is
-		// idempotent and still reports "already" itself, so attempt it rather
-		// than blocking the user on a probe hiccup.
-		if probe.Summary != nil {
-			mergeCheckinCache(f.ID, probe.Summary)
-		}
-	default:
-		if probe.Summary != nil && probe.Summary.TodayCheckedIn {
-			mergeCheckinCache(f.ID, probe.Summary)
-			out["success"] = true
-			out["skipped"] = true
-			out["reason"] = "already"
-			out["message"] = "already checked in today"
-			return out
-		}
-		if probe.Summary != nil {
-			mergeCheckinCache(f.ID, probe.Summary)
-		}
-	}
-
-	res, err := performCheckinCallWithCallback(sa, callbackID)
-	if err != nil {
-		out["error"] = err.Error()
-		out["success"] = false
-		return out
-	}
-	for k, v := range res {
-		out[k] = v
-	}
-	// Business soft-fail ("already checked in" family) → done, not failure.
-	if msg, _ := out["message"].(string); msg != "" && out["success"] == false {
-		low := strings.ToLower(msg)
-		if strings.Contains(low, "already") || strings.Contains(msg, "已签") || strings.Contains(msg, "今日") {
-			out["success"] = true
-			out["skipped"] = true
-			out["reason"] = "already"
-		}
-	}
-	if _, ok := out["success"]; !ok {
+	// Location is checked before probing or mutating anything. A Global
+	// credential is a local skip, not an activity-capability error.
+	if serviceFor(sa) != serviceCN {
 		out["success"] = true
-	}
-	// An explicit upstream failure is a real failure: leave the account's
-	// checked-in state untouched instead of implying new credits.
-	if out["success"] != true {
-		if out["message"] == nil {
-			out["message"] = "签到未成功"
-		}
+		out["skipped"] = true
+		out["reason"] = "global"
+		out["message"] = "国际版账号不参与签到与成长奖励"
 		return out
 	}
 
-	// Post-call cache refresh: one extra status fetch at most; on failure
-	// write a TodayCheckedIn placeholder rather than leaving the panel stale.
-	if ci2, err2 := fetchCheckinStatusWithCallback(sa, callbackID); err2 == nil && ci2 != nil {
-		mergeCheckinCache(f.ID, ci2)
-	} else {
-		mergeCheckinCache(f.ID, &checkinSummary{TodayCheckedIn: true})
-	}
+	withCheckinLock(f.AuthIndex, func() {
+		probe := checkinCapabilityProbe(sa, callbackID)
+		if probe.Summary != nil {
+			probe.Summary.Capability = string(probe.Capability)
+			probe.Summary.CapabilityNote = probe.Message
+		}
+		switch probe.Capability {
+		case capabilityUnsupported:
+			mergeCheckinCache(f.ID, &checkinSummary{
+				Capability: string(capabilityUnsupported), CapabilityNote: probe.Message,
+			})
+			out["success"] = false
+			out["skipped"] = true
+			out["reason"] = "unsupported"
+			out["message"] = probe.Message
+			return
+		case capabilityUnknown:
+			if probe.Summary != nil {
+				mergeCheckinCache(f.ID, probe.Summary)
+			}
+		default:
+			if probe.Summary != nil && probe.Summary.TodayCheckedIn {
+				mergeCheckinCache(f.ID, probe.Summary)
+				out["success"] = true
+				out["skipped"] = true
+				out["reason"] = "already"
+				out["message"] = "今日已签到"
+				return
+			}
+			if probe.Summary != nil {
+				mergeCheckinCache(f.ID, probe.Summary)
+			}
+		}
+
+		res, err := performCheckinCallWithCallback(sa, callbackID)
+		if err != nil {
+			out["error"] = err.Error()
+			out["success"] = false
+			return
+		}
+		for k, v := range res {
+			out[k] = v
+		}
+		if msg, _ := out["message"].(string); msg != "" && out["success"] == false {
+			low := strings.ToLower(msg)
+			if strings.Contains(low, "already") || strings.Contains(msg, "已签") || strings.Contains(msg, "今日") {
+				out["success"] = true
+				out["skipped"] = true
+				out["reason"] = "already"
+			}
+		}
+		if _, ok := out["success"]; !ok {
+			out["success"] = true
+		}
+		if out["success"] != true {
+			if out["message"] == nil {
+				out["message"] = "签到未成功"
+			}
+			return
+		}
+		if ci2, err2 := fetchCheckinStatusWithCallback(sa, callbackID); err2 == nil && ci2 != nil {
+			mergeCheckinCache(f.ID, ci2)
+		} else {
+			mergeCheckinCache(f.ID, &checkinSummary{TodayCheckedIn: true})
+		}
+	})
 	return out
 }
 

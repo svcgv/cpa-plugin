@@ -1,6 +1,6 @@
 # QoderWork CPA 插件
 
-[CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) 的 QoderWork Provider 插件：**国内版（qoder.com.cn）+ 国际版（qoder.com）双区域**、多账号 OAuth/PAT 双登录、动态模型、COSY / Bearer 双协议推理、每日签到、积分面板、token 自动保活。
+[CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) 的 QoderWork Provider 插件：**国内版（qoder.com.cn）+ 国际版（qoder.com）双区域**、多账号 OAuth/PAT 双登录、动态模型、COSY / Bearer 双协议推理、每日奖励、积分面板、token 自动保活。
 
 ## 功能
 
@@ -11,8 +11,8 @@
 | **Pro 领取** | 面板手动「领取 Pro」：先查 eligibility，可领才 claim 一次性 Pro 升级包（+1800），不自动领取 |
 | **双区域推理** | CN：COSY 签名（RSA 包 AES 会话密钥 + MD5 请求签名）对接 gateway.qoder.com.cn SSE；国际版：`Authorization: Bearer {jt-}` 直连 api2-v2.qoder.sh 的 OpenAI `/model/v1/chat/completions` |
 | **动态模型** | CN：COSY 拉取 `/algo/api/v2/model/list?Encode=1`（bodyless GET，空 body 签名），按 `assistant` → `chat` → `inline` scene 解析（对齐 Qoder CLI 1.1.69）；国际版：同一 COSY scene 目录，网关为 `api2.qoder.sh/algo/api/v2/model/list`（Bearer `/model/v1/models` 仅作兜底）。缓存按账号隔离；各自有静态兜底，失败原因可在 `/plugins/qoderwork/models/status` 查看 |
-| **每日签到** | 仅国内版：面板手动签到（单账号/批量）+ 09:00/21:00 定时自动签到，签到后返回最新积分快照；国际版账号自动跳过 |
-| **积分面板** | 账号卡片：昵称/区域徽标/积分/计划/签到状态/操作（CN 显示签到+领取Pro；国际版仅刷新/选用） |
+| **每日奖励** | 仅国内版：读取活动列表并领取当前窗口内的 `CLAIMABLE` Credits，面板支持单账号、批量与自动领取；北京时间 10:05、11:05、15:05、19:05、23:05 查询。仅活动接口返回 404/405 时回退旧签到接口 |
+| **积分面板** | 账号卡片：昵称/区域徽标/积分/计划/领取状态/操作（CN 显示每日奖励+领取Pro；国际版仅刷新/选用） |
 | **token 保活** | 22:00 定时刷新；按 token 前缀路由（drt- → deviceToken/refresh，jrt- → jobToken/refresh），刷新端点按区域选择（qoder.com.cn / qoder.sh）；PAT 永不劫持 OAuth 刷新 |
 | **auth 隔离** | 文件名前缀 `qoderwork-` 过滤，与 workbuddy 等其他插件互不干扰 |
 
@@ -43,6 +43,12 @@ plugins:
   configs:
     qoderwork:
       enabled: true
+
+      # 仅 CN；国际版永不执行。account_key 可从 /rewards/status 获取。
+      rewards:
+        auto: true
+        actions:
+          checkin: true
 
 # 模型别名（可选）
 oauth-model-alias:
@@ -78,8 +84,9 @@ PAT 与新 token 家族可共存：重新用 OAuth 登录同一账号时，已�
 
 `/v0/resource/plugins/qoderwork/panel`（需 management key）
 
-- 账号卡片：积分余额 / 计划 / 签到按钮（签到后返回最新积分）
-- 「全部签到」批量签到；自动签到开关（09:00/21:00）
+- 账号卡片：积分余额 / 计划 / 每日奖励按钮（领取后返回最新积分）
+- 「一键领取全部」批量领取；「奖励设置」可保存自动开关与账号覆盖
+- 领取记录显示逐项结果；国际版不显示奖励操作，也不会发起奖励请求
 
 ## 凭证家族与刷新
 
@@ -126,7 +133,7 @@ auth 文件字段（可共存）：
 | 推理协议 | COSY 签名 + agent_chat_generation | `Bearer {jt-}` + OpenAI `/model/v1/chat/completions` |
 | 设备授权回调 | `qoder-work-cn://` | `qoder://aicoding.aicoding-agent/login-success` |
 | 模型清单 | `/algo/api/v2/model/list`（COSY） | `api2.qoder.sh/algo/api/v2/model/list`（COSY；`/model/v1/models` 兜底） |
-| 签到 / 积分 / Pro 包 | 有 | 无 |
+| 签到、每日奖励 / 积分 / Pro 包 | 有 | 无（奖励流程本地跳过） |
 
 区域在登录时选择并持久化到 auth 文件（`region` 字段，兼容旧的 `domain` 推断）。
 同一实例可同时挂 CN 与国际版账号：面板分别打 `CN` / `INTL` 徽标并按区域筛选，

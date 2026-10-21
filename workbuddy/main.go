@@ -355,7 +355,11 @@ func wbRegistration() registration {
 			GitHubRepository: "https://github.com/Sliverkiss/cpa-plugin",
 			Logo:             pluginLogoURL,
 			ConfigFields: []pluginapi.ConfigField{
-				{Name: "checkin_auto", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Enable daily auto check-in at 09:00 and 21:00 local time for accounts whose service exposes a check-in activity (default true). Accounts without one are skipped."},
+				{Name: "rewards", Type: pluginapi.ConfigFieldTypeObject, Description: "CN-only reward settings: auto (default true), actions (checkin, travel, tasks, makeup, redeem, lottery, energy; default true), and account overrides keyed by the account_key returned by /rewards/status."},
+				// Legacy switch retained for existing deployments. It is parsed
+				// by the same reward config and applies only to growth actions.
+				{Name: "growth_auto", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Legacy growth-center switch (default true). Passed through by older management clients; rewards.actions controls each action in current versions."},
+				{Name: "checkin_auto", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Compatibility switch for CN auto check-in; the rewards.actions.checkin switch takes precedence when rewards is configured (default true)."},
 				{Name: "lifecycle_auto", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Auto disable accounts whose credits are exhausted, and re-enable them once credits recover. Credentials are deleted only when the account's service has no check-in activity to recover from (default true)."},
 				{Name: "token_keepalive", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Enable daily access-token refresh at 22:00 local time to prevent Keycloak offline-session expiry (default true)."},
 				{Name: "desensitize", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Insert U+200B into configured blocked terms in system/developer prompt text and tool title/description fields (default false)."},

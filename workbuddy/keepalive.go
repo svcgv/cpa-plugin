@@ -8,8 +8,7 @@
 // daily keeps the offline session alive, the same way a real client would.
 //
 // Design:
-//   - Runs on the existing schedulerLoop at 22:00 local (keepaliveHours is
-//     separate from checkinHours so the two cadences can evolve independently).
+//   - Runs on the existing schedulerLoop at 22:00 local (keepaliveHours).
 //   - Iterates all workbuddy auths via host.auth.list/get, calls
 //     {realm-base}/v2/plugin/auth/token/refresh with X-Refresh-Token via
 //     the host HTTP bridge (host.http.do).
@@ -30,8 +29,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
-// keepaliveHours is the daily refresh schedule (local time). Kept separate
-// from checkinHours so the two cadences can evolve independently.
+// keepaliveHours is the daily refresh schedule (local time).
 var keepaliveHours = []int{22}
 
 // keepaliveAuto gates the daily refresh. Default true; configurable via
@@ -294,7 +292,7 @@ func runTokenKeepaliveWithCallback(callbackID string) *keepaliveSummary {
 	return sum
 }
 
-// nextKeepaliveTime mirrors nextCheckinTime but for keepaliveHours.
+// nextKeepaliveTime returns the next local keepalive hour.
 func nextKeepaliveTime(now time.Time) time.Time {
 	var earliest time.Time
 	for _, h := range keepaliveHours {

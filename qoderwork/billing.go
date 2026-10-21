@@ -35,7 +35,7 @@ type checkinStatusResponse struct {
 	RewardExpiresAt    int64  `json:"rewardExpiresAt"` // s epoch
 }
 
-func fetchCheckinStatus(sa *storedAuth) (*checkinSummary, error) {
+func fetchLegacyCheckinStatus(sa *storedAuth) (*checkinSummary, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamBaseCN+"/sash/api/v1/me/daily-check-in/status", nil)
@@ -167,7 +167,7 @@ func fetchPaymentType(sa *storedAuth) string {
 	return p.UserType
 }
 
-func performCheckinCall(sa *storedAuth) (map[string]any, error) {
+func performLegacyCheckinCall(sa *storedAuth) (map[string]any, error) {
 	if !sa.isCN() {
 		return nil, errCheckinUnsupported
 	}

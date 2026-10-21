@@ -1,10 +1,10 @@
-// checkin.go implements daily check-in for CN accounts: the manual
-// handleManualCheckin endpoint, the 09:00 / 21:00 auto scheduler, and the
-// per-account mutex that prevents duplicate check-ins from racing browser
-// tabs. CN accounts are excluded — they use one-shot trial claims instead.
+// checkin.go keeps the legacy /checkin entry and token keepalive scheduler.
+// CN campaigns run through rewards_management.go in China time; international
+// accounts are rejected locally before any reward request.
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -28,6 +28,7 @@ func ensureScheduler() {
 	}
 	schedulerStop = make(chan struct{})
 	go schedulerLoop(schedulerStop)
+	go rewardSchedulerLoop(schedulerStop)
 }
 
 // Note: there is deliberately no stopCheckinScheduler. The plugin shutdown
@@ -35,20 +36,17 @@ func ensureScheduler() {
 // during its own runtime teardown, where touching Go sync primitives from the
 // plugin's c-shared runtime caused SIGSEGV on every restart.
 
-func nextCheckinTime(now time.Time) time.Time {
+// nextKeepaliveWakeTime returns the next local 22:00 token refresh. Campaign
+// rewards are scheduled exclusively by rewardSchedulerLoop in China time.
+func nextKeepaliveWakeTime(now time.Time) time.Time {
 	var earliest time.Time
-	// Consider both checkin and keepalive schedules so the timer wakes up for
-	// whichever fires first (e.g. 21:00 checkin vs 22:00 keepalive → 21:00 wins,
-	// then 22:00 keepalive fires on the next tick).
-	hours := append([]int{}, checkinHours...)
-	hours = append(hours, keepaliveHours...)
-	for _, h := range hours {
-		t := time.Date(now.Year(), now.Month(), now.Day(), h, 0, 0, 0, now.Location())
-		if !t.After(now) {
-			t = t.Add(24 * time.Hour) // slot already passed today → tomorrow
+	for _, hour := range keepaliveHours {
+		next := time.Date(now.Year(), now.Month(), now.Day(), hour, 0, 0, 0, now.Location())
+		if !next.After(now) {
+			next = next.Add(24 * time.Hour)
 		}
-		if earliest.IsZero() || t.Before(earliest) {
-			earliest = t
+		if earliest.IsZero() || next.Before(earliest) {
+			earliest = next
 		}
 	}
 	return earliest
@@ -56,18 +54,16 @@ func nextCheckinTime(now time.Time) time.Time {
 
 func schedulerLoop(stop chan struct{}) {
 	for {
-		next := nextCheckinTime(time.Now())
+		next := nextKeepaliveWakeTime(time.Now())
 		timer := time.NewTimer(time.Until(next))
 		select {
 		case <-stop:
 			timer.Stop()
 			return
 		case <-timer.C:
-			runAutoCheckin()
-			// Fire keepalive if the current tick falls within its scheduled
-			// window (e.g. 22:00 keepalive fires on the 22:00 tick even though
-			// the previous checkin tick was 21:00).
-			if shouldRunKeepaliveNow(time.Now()) {
+			// The legacy loop only handles token keepalive; reward work has its
+			// own China-time scheduler and must not be triggered twice.
+			if keepaliveEnabled() && shouldRunKeepaliveNow(time.Now()) {
 				runTokenKeepalive()
 			}
 		}
@@ -81,93 +77,6 @@ func schedulerLoop(stop chan struct{}) {
 // v0.6.31: per-account work runs concurrently (sem=4) — was serial, so N accounts
 // meant 3N serial HTTP round-trips on the billing API. Matches the pattern used
 // by buildDashboardEx and handleManualCheckin.
-func runAutoCheckin() {
-	checkinAutoMu.RLock()
-	doCheckin := checkinAuto
-	checkinAutoMu.RUnlock()
-	// Lifecycle may still run when check-in is off (credit gate).
-	if !doCheckin && !lifecycleEnabled() {
-		return
-	}
-	files, err := hostAuthList()
-	if err != nil {
-		return
-	}
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 4)
-	for _, f := range files {
-		f := f
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			processAutoCheckinAccount(f, doCheckin)
-		}()
-	}
-	wg.Wait()
-}
-
-// processAutoCheckinAccount handles one account's scheduled tick. Extracted so
-// runAutoCheckin can fan out per-account work without duplicating logic.
-func processAutoCheckinAccount(f pluginapi.HostAuthFileEntry, doCheckin bool) {
-	// A-24: only fetch sa when needed (checkin). For lifecycle-only paths,
-	// let reconcileOneAccount do the single hostAuthGetBundle internally.
-	if doCheckin {
-		sa, err := hostAuthGet(f.AuthIndex)
-		if err != nil {
-			return
-		}
-		// CN: daily check-in when enabled.
-		ci, err := fetchCheckinStatus(sa)
-		if err == nil && ci != nil && ci.Active && !ci.TodayCheckedIn {
-			if _, callErr := performCheckinCall(sa); callErr == nil {
-				// Refresh once after a successful checkin call so cache reflects
-				// the post-call state. If the status call fails keep the pre-call
-				// snapshot rather than dropping it (v0.6.31: avoid shadowing ci
-				// with a second fetch that could race with concurrent readers).
-				if ci2, _ := fetchCheckinStatus(sa); ci2 != nil {
-					ci = ci2
-				}
-				// P1-5: checkin grants new credits — refresh the credits cache
-				// immediately so the panel shows the updated balance without
-				// waiting for the async reconcile pass.
-				if cr2, crErr := fetchUserResource(sa); crErr == nil && cr2 != nil {
-					if v, ok := accountCache.Load(f.ID); ok {
-						if prev, ok2 := v.(*accountCacheEntry); ok2 {
-							fresh := *prev
-							fresh.credits = cr2
-							fresh.fetched = time.Now()
-							accountCache.Store(f.ID, &fresh)
-						}
-					}
-				}
-			}
-		}
-		// Refresh cache with latest checkin status (merge, don't wipe credits/plan).
-		if ci != nil {
-			var prev *accountCacheEntry
-			if v, ok := accountCache.Load(f.ID); ok {
-				prev, _ = v.(*accountCacheEntry)
-			}
-			entry := &accountCacheEntry{checkin: ci, fetched: time.Now()}
-			if prev != nil {
-				entry.credits = prev.credits
-				entry.plan = prev.plan
-			}
-			accountCache.Store(f.ID, entry)
-		}
-		if lifecycleEnabled() {
-			_, _ = reconcileOneAccount(f.AuthIndex, f.ID, true)
-		}
-		return
-	}
-	// Lifecycle-only (checkin off): reconcile handles its own get.
-	if lifecycleEnabled() {
-		_, _ = reconcileOneAccount(f.AuthIndex, f.ID, true)
-	}
-}
-
 // handleManualCheckin checks in one account (auth_index) or all qoderwork
 // accounts. Unlike the workbuddy three-phase classify/execute/summarize flow,
 // QoderWork's checkin is a simple Bearer GET+POST — we run it directly per
@@ -250,81 +159,39 @@ func handleManualCheckin(req pluginapi.ManagementRequest) map[string]any {
 // checkinOneAccount performs the actual GET status + POST claim flow for one
 // account. 8s overall budget — never blocks past that.
 func checkinOneAccount(f pluginapi.HostAuthFileEntry) map[string]any {
-	out := map[string]any{
-		"auth_index": f.AuthIndex,
-		"name":       f.Name,
-	}
-	mu := checkinLockFor(f.AuthIndex)
-	mu.Lock()
-	defer mu.Unlock()
-
+	out := map[string]any{"auth_index": f.AuthIndex, "name": f.Name}
 	sa, err := hostAuthGet(f.AuthIndex)
 	if err != nil {
 		out["error"] = "get auth: " + err.Error()
 		return out
 	}
 	out["nickname"] = sa.Account.Nickname
-
-	// Check-in is a CN-only reward surface; international accounts have no
-	// check-in activity, so skip them cleanly instead of erroring.
 	if !sa.isCN() {
 		out["success"] = true
 		out["skipped"] = true
 		out["reason"] = "intl"
-		out["message"] = "国际版无需签到"
+		out["message"] = "国际版不参与签到与每日奖励"
 		return out
 	}
-
-	// Step 1: GET status (5s budget).
-	ci, err := fetchCheckinStatus(sa)
-	if err != nil {
-		out["error"] = "status: " + err.Error()
-		return out
+	mu := checkinLockFor(f.AuthIndex)
+	mu.Lock()
+	defer mu.Unlock()
+	steps, credits, success, attention, _ := runQoderRewards(context.Background(), sa, rewardActionOrder, true)
+	out["success"] = success
+	out["needs_attention"] = attention
+	if credits > 0 {
+		out["reward_credits"] = credits
 	}
-	if ci.TodayCheckedIn {
-		out["success"] = true
-		out["skipped"] = true
-		out["reason"] = "already"
-		out["message"] = "今日已签到"
-		out["streak_days"] = ci.StreakDays
-		out["total_credits"] = ci.TotalCredits
-		return out
-	}
-
-	// Step 2: POST claim (5s budget).
-	res, err := performCheckinCall(sa)
-	if err != nil {
-		out["error"] = "claim: " + err.Error()
-		return out
-	}
-	// QoderWork returns {"result":"ALREADY_CLAIMED"} with HTTP 409 — surface
-	// as already rather than error.
-	if result, _ := res["result"].(string); result == "ALREADY_CLAIMED" {
-		out["success"] = true
-		out["skipped"] = true
-		out["reason"] = "already"
-		out["message"] = "今日已签到"
-		if rc, ok := res["rewardCredits"].(float64); ok {
-			out["reward_credits"] = int64(rc)
+	if len(steps) > 0 {
+		out["message"] = steps[len(steps)-1].Message
+		if steps[len(steps)-1].Status == "skipped" {
+			out["skipped"] = true
+			out["reason"] = "already"
 		}
-		return out
 	}
-	if success, _ := res["success"].(bool); success {
-		out["success"] = true
-		if rc, ok := res["rewardCredits"].(float64); ok {
-			out["reward_credits"] = int64(rc)
-		}
-		out["message"] = "签到成功"
-		// Refresh the credits snapshot so the panel shows the post-checkin
-		// balance immediately (check-in grants new credits). Best-effort:
-		// a failure here must not flip the check-in result to error.
-		if cr, crErr := fetchUserResource(sa); crErr == nil && cr != nil {
-			out["credits"] = cr
-		}
-		return out
+	if attention && success == false {
+		out["error"] = out["message"]
 	}
-	out["success"] = false
-	out["message"] = res
 	return out
 }
 

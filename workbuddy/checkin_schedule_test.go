@@ -18,8 +18,8 @@ func TestScheduledActionsAtKeepaliveOnlyHour(t *testing.T) {
 
 func TestScheduledActionsAtCheckinHour(t *testing.T) {
 	runCheckin, runKeepalive := scheduledActionsFor(time.Date(2026, 8, 18, 21, 0, 0, 0, time.Local))
-	if !runCheckin {
-		t.Fatal("21:00 should run auto check-in")
+	if runCheckin {
+		t.Fatal("legacy local scheduler must not run check-in; reward scheduler owns it")
 	}
 	if runKeepalive {
 		t.Fatal("21:00 should not run keepalive")
