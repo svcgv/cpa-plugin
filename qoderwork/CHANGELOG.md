@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.1
+## 0.7.1 (qoderwork 0.5.3)
 
 ### Fix "only auto works": read the current catalog scene and stop sharing a stale cache
 
