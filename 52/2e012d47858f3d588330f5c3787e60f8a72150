@@ -1,0 +1,56 @@
+qoderwork/intl_test.go
+  s_042c9b27aa8dac::t_a1ea736a57a1a3 178-212
+qoderwork/models.go
+  s_042c9b27aa8dac::t_9444618662dda3 390,406,411
+  s_042c9b27aa8dac::t_6731469b86bf1f 396-399,422-428,433,496-498,541-542,545-546,548-549,634-635,638-644
+  s_042c9b27aa8dac::t_8a70cf14456037 660-662
+  s_042c9b27aa8dac::t_cee58eef5c49a9 485-494,508-535,552-561,570-571,576-588,600-612,615-626,629,648
+  s_042c9b27aa8dac::t_7cb2fe98b23cf0 500-505
+  s_042c9b27aa8dac::t_a39dfedecd9552 391-395,403-405,410,412
+  s_042c9b27aa8dac::t_a736c96fcdb59e 40-59,62-64,69,71-74,78-97,183,188,241,321-324,335,688
+qoderwork/models_test.go
+  s_042c9b27aa8dac::t_c79a00cb72ac80 162,166-167,173,189,192-193
+  s_042c9b27aa8dac::t_9c83c45a42ad95 197-219
+  s_515f352c033a56::t_1c6880775007b2 12-13
+  s_042c9b27aa8dac::t_3d42a4356a7463 54,63-67,72-100,103-114,122-123,125-126,135,140,163,165,168-169,194-196,220-236
+qoderwork/main.go
+  s_042c9b27aa8dac::t_1326d9bdb871f5 374
+  s_042c9b27aa8dac::t_a39dfedecd9552 375-380,389-391,396-397
+  s_515f352c033a56::t_66cbb0a883e74f 398-400
+qoderwork/sign.go
+  s_042c9b27aa8dac::t_a39dfedecd9552 175-176,185-188
+analysis/qorder/README.md
+  s_042c9b27aa8dac::t_83d7f436297af6 1-70
+qoderwork/CHANGELOG.md
+  s_042c9b27aa8dac::t_c7abb8f1f3dac0 3-42
+qoderwork/README.md
+  s_515f352c033a56::t_24dd74e10739a2 13,103,128
+qoderwork/intl.go
+  s_042c9b27aa8dac::t_7b8154e1b450d9 353-374,376-378
+qoderwork/region.go
+  s_042c9b27aa8dac::t_3d6a18ebfe0fac 31-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "522e012d47858f3d588330f5c3787e60f8a72150",
+  "prompts": {},
+  "sessions": {
+    "s_042c9b27aa8dac": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15ca5-4e46-7970-9cc3-f48f1a5cf175",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    },
+    "s_515f352c033a56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15c78-040e-7001-b0f9-1915adb5c1b8",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
