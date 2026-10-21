@@ -1,0 +1,19 @@
+.codex/AGENTS.md
+  s_515f352c033a56::t_8a8c9e0cda784a 1-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f92cc9fd86b2c3ca772e5ee0431893b4883e5f36",
+  "prompts": {},
+  "sessions": {
+    "s_515f352c033a56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15c78-040e-7001-b0f9-1915adb5c1b8",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
