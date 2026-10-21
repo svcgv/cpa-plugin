@@ -205,6 +205,15 @@ func cosySigPath(rawURL string) (string, error) {
 	return pathSig, nil
 }
 
+// jsonString encodes s as a JSON string literal.
+func jsonString(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return `""`
+	}
+	return string(b)
+}
+
 // buildBearer constructs the Authorization header for one request.
 // body is the exact string the caller puts on the wire (the QoderEncoding
 // payload for POSTs, empty for bodyless GETs).
@@ -213,14 +222,13 @@ func (s *cosySession) buildBearer(body, rawURL string) (payloadB64, date, bearer
 	if err != nil {
 		return "", "", "", err
 	}
-	payload := map[string]string{
-		"cosyVersion": "0.1.43",
-		"ideVersion":  "",
-		"info":        s.Info,
-		"requestId":   uuid.NewString(),
-		"version":     "v1",
-	}
-	payloadB64 = base64.StdEncoding.EncodeToString(jsonSortedCompact(payload))
+	// Field order matches the Wasm client exactly (version, requestId, info,
+	// cosyVersion, ideVersion); the gateway hashes the literal string.
+	payloadB64 = base64.StdEncoding.EncodeToString([]byte(
+		`{"version":"v1","requestId":` + jsonString(uuid.NewString()) +
+			`,"info":` + jsonString(s.Info) +
+			`,"cosyVersion":` + jsonString(cosyClientVersion) +
+			`,"ideVersion":""}`))
 	date = fmt.Sprintf("%d", time.Now().Unix())
 	sum := md5.Sum([]byte(payloadB64 + "\n" + s.CosyKey + "\n" + date + "\n" + body + "\n" + pathSig))
 	sig := hex.EncodeToString(sum[:])

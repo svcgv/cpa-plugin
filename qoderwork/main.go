@@ -334,7 +334,7 @@ type registrationCapability struct {
 }
 
 // version is injected at build time via -ldflags "-X main.version=...".
-var version = "0.5.9"
+var version = "0.5.10"
 
 func wbRegistration() registration {
 	return registration{
@@ -702,7 +702,7 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "payload parse: "+err.Error())
 		return nil, fmt.Errorf("payload parse: %w", err)
 	}
-	body, err := buildQoderBody(qwReq, upstreamModel, uiUserType(nil))
+	body, err := buildQoderBody(qwReq, upstreamModel, uiUserType(nil), sa)
 	if err != nil {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "body build: "+err.Error())
 		return nil, fmt.Errorf("body build: %w", err)
@@ -789,7 +789,7 @@ func handleExecStream(raw []byte) ([]byte, error) {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "payload parse: "+err.Error())
 		return nil, fmt.Errorf("payload parse: %w", err)
 	}
-	body, err := buildQoderBody(qwReq, upstreamModel, uiUserType(nil))
+	body, err := buildQoderBody(qwReq, upstreamModel, uiUserType(nil), sa)
 	if err != nil {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "body build: "+err.Error())
 		return nil, fmt.Errorf("body build: %w", err)

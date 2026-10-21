@@ -63,7 +63,7 @@ func TestBuildQoderBodyWithContentParts(t *testing.T) {
 		Role:    "user",
 		Content: "ping",
 	}}}
-	body, err := buildQoderBody(req, "qfmodel", "personal_professional_trial")
+	body, err := buildQoderBody(req, "qfmodel", "personal_professional_trial", nil)
 	if err != nil {
 		t.Fatalf("buildQoderBody: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestClientSystemPromptReplacesQoderTemplate(t *testing.T) {
 	if err := json.Unmarshal(payload, &req); err != nil {
 		t.Fatal(err)
 	}
-	body, err := buildQoderBody(&req, "qfmodel", "personal_professional_trial")
+	body, err := buildQoderBody(&req, "qfmodel", "personal_professional_trial", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestClientSystemPromptReplacesQoderTemplate(t *testing.T) {
 // gateway expects that shape) but with a rewritten <env> block.
 func TestTemplateEnvIsRewrittenForThisHost(t *testing.T) {
 	req := &openAIRequest{Model: "qfmodel", Messages: []openAIMessage{{Role: "user", Content: "hi"}}}
-	body, err := buildQoderBody(req, "qfmodel", "personal_professional_trial")
+	body, err := buildQoderBody(req, "qfmodel", "personal_professional_trial", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestTemplateEnvUsesClientWorkingDirectory(t *testing.T) {
 		Messages: []openAIMessage{{Role: "user", Content: "hi"}},
 		Metadata: map[string]any{"cwd": "/Users/someone/my-project"},
 	}
-	body, err := buildQoderBody(req, "qfmodel", "personal_professional_trial")
+	body, err := buildQoderBody(req, "qfmodel", "personal_professional_trial", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

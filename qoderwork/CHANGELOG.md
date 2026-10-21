@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.8 (qoderwork 0.5.10, work in progress)
+
+### Prototype image attachment forwarding
+
+- Parse image references from Chat Completions content parts and Responses
+  `input` items; allow image-only user input through body construction.
+- Preserve the image references in `chat_context.imageUrls` and `image_urls`.
+- Add a gateway image-upload client for downloading HTTP/data URLs and uploading
+  them to `/algo/api/v2/image/upload`.
+
+Status: **not release-ready**. The upload endpoint still returns
+`101 Signature invalid` with the current upload signing attempt, so the model
+may still report that no image was received. Continue the Wasm `auth` signature
+reverse engineering before publishing this version.
+
+
 ## 0.7.7 (qoderwork 0.5.9)
 
 ### Surface why a stream produced no output

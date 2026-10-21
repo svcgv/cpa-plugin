@@ -62,6 +62,12 @@ func cpaToUpstreamKey(cpaModel string) string {
 type openAIMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+
+	// Images holds image URLs found in this message's content parts. The
+	// upstream agent body accepts them via image_urls /
+	// chat_context.imageUrls, so dropping them makes an image-only request
+	// fail with "no user message in request".
+	Images []string `json:"-"`
 }
 
 // UnmarshalJSON accepts a string or an array of content parts. Parts may carry
@@ -77,40 +83,47 @@ func (m *openAIMessage) UnmarshalJSON(raw []byte) error {
 		return err
 	}
 	m.Role = probe.Role
-	m.Content = contentText(probe.Content)
+	m.Content, m.Images = contentParts(probe.Content)
 	return nil
 }
 
 // contentText flattens an OpenAI content value into plain text.
-func contentText(raw json.RawMessage) string {
+func contentParts(raw json.RawMessage) (string, []string) {
 	v := bytes.TrimSpace(raw)
 	if len(v) == 0 || string(v) == "null" {
-		return ""
+		return "", nil
 	}
 	if v[0] == '"' {
 		var s string
 		if json.Unmarshal(v, &s) == nil {
-			return s
+			return s, nil
 		}
-		return ""
+		return "", nil
 	}
 	if v[0] != '[' {
-		return ""
+		return "", nil
 	}
 	var parts []json.RawMessage
 	if json.Unmarshal(v, &parts) != nil {
-		return ""
+		return "", nil
 	}
 	var out []string
+	var images []string
 	for _, part := range parts {
 		var p struct {
-			Type    string          `json:"type"`
-			Text    string          `json:"text"`
-			Content json.RawMessage `json:"content"`
-			Input   string          `json:"input_text"`
-			Output  string          `json:"output_text"`
+			Type     string          `json:"type"`
+			Text     string          `json:"text"`
+			Content  json.RawMessage `json:"content"`
+			Input    string          `json:"input_text"`
+			Output   string          `json:"output_text"`
+			ImageURL json.RawMessage `json:"image_url"`
+			FileData json.RawMessage `json:"file_data"`
 		}
 		if json.Unmarshal(part, &p) != nil {
+			continue
+		}
+		if url := imageURLFromPart(p.Type, p.ImageURL, p.FileData); url != "" {
+			images = append(images, url)
 			continue
 		}
 		switch {
@@ -122,12 +135,46 @@ func contentText(raw json.RawMessage) string {
 			out = append(out, p.Output)
 		case len(p.Content) > 0:
 			// Nested {"type":"message","content":[...]} or {"content":"..."}
-			if nested := contentText(p.Content); nested != "" {
+			if nested, nestedImages := contentParts(p.Content); nested != "" {
 				out = append(out, nested)
+				images = append(images, nestedImages...)
 			}
 		}
 	}
-	return strings.Join(out, "\n")
+	return strings.Join(out, "\n"), images
+}
+
+// imageURLFromPart extracts an image URL from a content part. Accepts the
+// Responses API shapes: {"type":"input_image","image_url":"https://..."},
+// {"type":"input_image","image_url":{"url":"https://..."}}, plus
+// {"type":"image_url","url":"..."} and inline base64 file_data.
+func imageURLFromPart(partType string, imageURL, fileData json.RawMessage) string {
+	t := strings.ToLower(strings.TrimSpace(partType))
+	if t != "input_image" && t != "image_url" && t != "image" {
+		return ""
+	}
+	for _, raw := range []json.RawMessage{imageURL, fileData} {
+		v := bytes.TrimSpace(raw)
+		if len(v) == 0 || string(v) == "null" {
+			continue
+		}
+		if v[0] == '"' {
+			var s string
+			if json.Unmarshal(v, &s) == nil && strings.TrimSpace(s) != "" {
+				return strings.TrimSpace(s)
+			}
+			continue
+		}
+		if v[0] == '{' {
+			var nested struct {
+				URL string `json:"url"`
+			}
+			if json.Unmarshal(v, &nested) == nil && strings.TrimSpace(nested.URL) != "" {
+				return strings.TrimSpace(nested.URL)
+			}
+		}
+	}
+	return ""
 }
 
 // openAIRequest is the CPA-facing chat completion request.
@@ -136,6 +183,10 @@ type openAIRequest struct {
 	Messages []openAIMessage `json:"messages"`
 	Stream   bool            `json:"stream"`
 
+	// Input carries the Responses API form when the caller (or CPA) forwards
+	// it directly: "input" may be a string or an array of typed items.
+	Input json.RawMessage `json:"input"`
+
 	// Clients sometimes disclose their real working directory. Codex puts it
 	// in session metadata; some OpenAI-compatible clients send it at the top
 	// level. The plugin runs inside CPA and cannot read it any other way, so
@@ -143,6 +194,59 @@ type openAIRequest struct {
 	// user's project.
 	CWD      string         `json:"cwd"`
 	Metadata map[string]any `json:"metadata"`
+}
+
+// effectiveMessages returns the conversation, accepting either the Chat
+// Completions "messages" field or the Responses API "input" field.
+func (r *openAIRequest) effectiveMessages() []openAIMessage {
+	if len(r.Messages) > 0 {
+		return r.Messages
+	}
+	return parseResponsesInput(r.Input)
+}
+
+// parseResponsesInput converts a Responses API "input" value into messages.
+// Accepts a plain string, an array of message objects, and an array of typed
+// content items (which become one user message).
+func parseResponsesInput(raw json.RawMessage) []openAIMessage {
+	v := bytes.TrimSpace(raw)
+	if len(v) == 0 || string(v) == "null" {
+		return nil
+	}
+	if v[0] == '"' {
+		var s string
+		if json.Unmarshal(v, &s) == nil && strings.TrimSpace(s) != "" {
+			return []openAIMessage{{Role: "user", Content: s}}
+		}
+		return nil
+	}
+	if v[0] != '[' {
+		return nil
+	}
+	var items []json.RawMessage
+	if json.Unmarshal(v, &items) != nil {
+		return nil
+	}
+	// Array of message objects ({role, content})?
+	var msgs []openAIMessage
+	asMessages := true
+	for _, item := range items {
+		var m openAIMessage
+		if json.Unmarshal(item, &m) != nil || m.Role == "" {
+			asMessages = false
+			break
+		}
+		msgs = append(msgs, m)
+	}
+	if asMessages && len(msgs) > 0 {
+		return msgs
+	}
+	// Array of content parts: flatten into a single user message.
+	text, images := contentParts(v)
+	if text == "" && len(images) == 0 {
+		return nil
+	}
+	return []openAIMessage{{Role: "user", Content: text, Images: images}}
 }
 
 // clientWorkingDir returns the caller's working directory when the request
@@ -224,16 +328,32 @@ func clientSystemText(messages []openAIMessage) string {
 	return strings.Join(parts, "\n\n")
 }
 
+// latestUserImages returns the images attached to the last user message, so an
+// image-only request is still delivered to the upstream.
+func latestUserImages(messages []openAIMessage) []string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role != "user" {
+			continue
+		}
+		if len(messages[i].Images) > 0 {
+			return messages[i].Images
+		}
+	}
+	return nil
+}
+
 // buildQoderBody renders the upstream agent_chat_generation body for one request.
 // modelKey is the upstream key (already mapped via cpaToUpstreamKey).
-func buildQoderBody(req *openAIRequest, modelKey, userType string) ([]byte, error) {
+func buildQoderBody(req *openAIRequest, modelKey, userType string, sa *storedAuth) ([]byte, error) {
 	var base map[string]any
 	if err := json.Unmarshal(basepromptJSON, &base); err != nil {
 		return nil, fmt.Errorf("baseprompt decode: %w", err)
 	}
 
-	prompt := extractLatestUserPrompt(req.Messages)
-	if prompt == "" {
+	messages := req.effectiveMessages()
+	prompt := extractLatestUserPrompt(messages)
+	images := latestUserImages(messages)
+	if prompt == "" && len(images) == 0 {
 		return nil, fmt.Errorf("no user message in request")
 	}
 
@@ -266,12 +386,27 @@ func buildQoderBody(req *openAIRequest, modelKey, userType string) ([]byte, erro
 		}
 	}
 
+	// Images: the upstream agent body reads them from chat_context.imageUrls,
+	// and only accepts URLs the gateway itself issued. Client-supplied URLs
+	// (public links, data URLs) are therefore downloaded and re-uploaded via
+	// /algo/api/v2/image/upload; if that fails the image is dropped rather than
+	// sending a URL the gateway would silently ignore.
+	if len(images) > 0 {
+		uploaded := resolveClientImages(sa, images)
+		if len(uploaded) > 0 {
+			if cc, ok := base["chat_context"].(map[string]any); ok {
+				cc["imageUrls"] = uploaded
+			}
+			base["image_urls"] = uploaded
+		}
+	}
+
 	// messages: the Qoder template system prompt is kept (the gateway expects
 	// that shape) but its <env> block is rewritten for this host. When the
 	// client ships its own agent prompt (Codex), it is placed FIRST so its
 	// identity and instructions are not overridden by "You are Qoder".
 	var out []any
-	client := clientSystemText(req.Messages)
+	client := clientSystemText(messages)
 	if client != "" {
 		// Plan B: the client already ships a full agent prompt (Codex). Drop
 		// the Qoder template system prompt entirely so its identity, env and
@@ -291,7 +426,7 @@ func buildQoderBody(req *openAIRequest, modelKey, userType string) ([]byte, erro
 			}
 		}
 	}
-	for _, m := range req.Messages {
+	for _, m := range messages {
 		if m.Role == "system" {
 			continue // already emitted first
 		}
