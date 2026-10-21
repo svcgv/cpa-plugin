@@ -1,0 +1,14 @@
+.gitignore
+  h_728f7e82ed36a7 19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bfec2b51ea597414fbb2545a8e5a65fe8974a36d",
+  "prompts": {},
+  "humans": {
+    "h_728f7e82ed36a7": {
+      "author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
