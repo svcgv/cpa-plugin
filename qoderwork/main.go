@@ -334,7 +334,7 @@ type registrationCapability struct {
 }
 
 // version is injected at build time via -ldflags "-X main.version=...".
-var version = "0.5.6"
+var version = "0.5.7"
 
 func wbRegistration() registration {
 	return registration{
@@ -693,7 +693,7 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 	if sa.region() == regionIntl {
 		return executeIntl(req, sa, intlUpstreamModel(stripProviderPrefix(req.Model)), started, authUID)
 	}
-	upstreamModel := cpaToUpstreamKey(stripProviderPrefix(req.Model))
+	upstreamModel := cpaToUpstreamKey(resolveUpstreamModel(stripProviderPrefix(req.Model), req.AuthAttributes))
 	// Build the QoderWork agent_chat_generation body from the OpenAI request,
 	// then QoderEncoding-encode it. The template embeds a 10657-token system
 	// prompt that the server requires for normal behaviour (KNOWLEDGE §5.2).
@@ -777,7 +777,7 @@ func handleExecStream(raw []byte) ([]byte, error) {
 	if sa.region() == regionIntl {
 		return handleExecStreamIntl(req, sa, started, authUID)
 	}
-	upstreamModel := cpaToUpstreamKey(stripProviderPrefix(req.Model))
+	upstreamModel := cpaToUpstreamKey(resolveUpstreamModel(stripProviderPrefix(req.Model), req.AuthAttributes))
 
 	// Build the QoderWork body (template-based) and QoderEncoding-encode.
 	bodyRaw := req.Payload

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.5 (qoderwork 0.5.7)
+
+### Wire `oauth-model-alias` back to the upstream model key
+
+`resolveUpstreamModel` existed but was never called, so a CPA alias such as
+`deepseek-4.1-flash -> dfmodel` was forwarded to the gateway verbatim. The
+gateway does not recognise the alias and the request fails.
+
+- Both the streaming and non-streaming CN executors now resolve the alias
+  before `cpaToUpstreamKey`.
+- Alias lookup is case-insensitive and also accepts a `qoderwork/` or `qoder/`
+  prefix, in case the client sends the provider-qualified name.
+- Added regression tests covering host aliases, the per-auth attribute forms
+  (`[{"name","alias"}]`, `{alias: name}`, `alias=name`) and passthrough of
+  unknown models.
+
+Note: once CPA applies an alias it replaces the original name in `/v1/models`,
+so calling the upstream name directly returns 502 `unknown provider for model`.
+That is host behaviour, not a plugin bug — use the alias.
+
+
 ## 0.7.4 (qoderwork 0.5.6)
 
 ### Never invent a working directory in the template prompt

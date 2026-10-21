@@ -325,3 +325,46 @@ func TestReadOfficialMachineIdentity(t *testing.T) {
 		t.Fatalf("headers = %#v", hdr)
 	}
 }
+
+// Aliases configured in CPA (oauth-model-alias) must be mapped back to the
+// upstream key before the request is built; otherwise the gateway receives an
+// unknown model name.
+func TestResolveUpstreamModelFromHostAliases(t *testing.T) {
+	cacheModelAliases(pluginapi.HostConfigSummary{
+		OAuthModelAlias: map[string][]pluginapi.ModelAlias{
+			providerName: {{Name: "dfmodel", Alias: "deepseek-4.1-flash"}},
+		},
+	})
+	t.Cleanup(func() {
+		modelAliasCache.Lock()
+		modelAliasCache.byAlias = nil
+		modelAliasCache.Unlock()
+	})
+
+	if got := resolveUpstreamModel("deepseek-4.1-flash", nil); got != "dfmodel" {
+		t.Fatalf("alias = %q want dfmodel", got)
+	}
+	// Case-insensitive, and tolerates a provider prefix.
+	if got := resolveUpstreamModel("DeepSeek-4.1-Flash", nil); got != "dfmodel" {
+		t.Fatalf("case-insensitive alias = %q", got)
+	}
+	if got := resolveUpstreamModel("qoderwork/deepseek-4.1-flash", nil); got != "dfmodel" {
+		t.Fatalf("prefixed alias = %q", got)
+	}
+	// Unknown models pass through untouched.
+	if got := resolveUpstreamModel("qfmodel", nil); got != "qfmodel" {
+		t.Fatalf("passthrough = %q", got)
+	}
+}
+
+func TestParseModelAliasAttribute(t *testing.T) {
+	attrs := map[string]string{"model_alias": `[{"name":"dfmodel","alias":"ds-flash"}]`}
+	if got := resolveUpstreamModel("ds-flash", attrs); got != "dfmodel" {
+		t.Fatalf("json list = %q", got)
+	}
+	// Documents the documented pair form: "alias=name".
+	attrs = map[string]string{"model_alias": "ds-flash=dfmodel"}
+	if got := resolveUpstreamModel("ds-flash", attrs); got != "dfmodel" {
+		t.Fatalf("pair form = %q", got)
+	}
+}

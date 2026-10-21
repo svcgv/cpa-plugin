@@ -744,6 +744,18 @@ func resolveUpstreamModel(model string, attributes map[string]string) string {
 	}
 	modelAliasCache.RLock()
 	name, ok := modelAliasCache.byAlias[key]
+	if !ok {
+		// Some clients send "qoderwork/alias" or "qoder/alias"; try the bare
+		// alias once before giving up.
+		for _, prefix := range []string{providerName + "/", "qoder/"} {
+			if strings.HasPrefix(key, prefix) {
+				if n, hit := modelAliasCache.byAlias[strings.TrimPrefix(key, prefix)]; hit {
+					name, ok = n, true
+					break
+				}
+			}
+		}
+	}
 	modelAliasCache.RUnlock()
 	if ok {
 		return name
