@@ -107,6 +107,7 @@ func pumpUpstreamStream(httpReq *http.Request, cancel context.CancelFunc, stream
 		return
 	}
 	collector := &sseUsageCollector{}
+	emitted, unparsed := 0, 0
 	scanner := bufio.NewScanner(newHostStreamReader(stream))
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
@@ -115,17 +116,16 @@ func pumpUpstreamStream(httpReq *http.Request, cancel context.CancelFunc, stream
 			continue
 		}
 		payload := strings.TrimPrefix(line, "data:")
-		var outer map[string]any
-		if json.Unmarshal([]byte(payload), &outer) != nil {
-			continue
-		}
-		bodyStr, ok := outer["body"].(string)
-		if !ok {
-			continue
-		}
-		if bodyStr == "[DONE]" {
+		payload = strings.TrimSpace(payload)
+		if payload == "[DONE]" {
 			break
 		}
+		bodyStr := unwrapUpstreamChunk(payload)
+		if bodyStr == "" {
+			unparsed++
+			continue
+		}
+		emitted++
 		collector.feed(bodyStr)
 		cleaned := cleanChunkJSON(bodyStr)
 		if cleaned == "" {
@@ -145,6 +145,15 @@ func pumpUpstreamStream(httpReq *http.Request, cancel context.CancelFunc, stream
 	if err := scanner.Err(); err != nil {
 		publishUsage(requestedModel, upstreamModel, authUID, started, collector.detail(), true, 0, err.Error())
 		streamEmitError(streamID, fmt.Sprintf("upstream stream read error: %v", err))
+		return
+	}
+	if emitted == 0 {
+		// The upstream answered 200 but nothing was recognised. Closing the
+		// host stream here would surface as "empty_stream: upstream stream
+		// closed before first payload" with no diagnosis, so emit the reason.
+		msg := fmt.Sprintf("upstream produced no usable chunk (%d unrecognised data lines)", unparsed)
+		publishUsage(requestedModel, upstreamModel, authUID, started, collector.detail(), true, 0, msg)
+		streamEmitError(streamID, msg)
 		return
 	}
 	publishUsage(requestedModel, upstreamModel, authUID, started, collector.detail(), false, 0, "")
@@ -181,12 +190,11 @@ func collectUpstreamStreamQoder(encodedBody string, sa *storedAuth, modelKey str
 			continue
 		}
 		payload := strings.TrimPrefix(line, "data:")
-		var outer map[string]any
-		if json.Unmarshal([]byte(payload), &outer) != nil {
+		if strings.TrimSpace(payload) == "[DONE]" {
 			continue
 		}
-		bodyStr, ok := outer["body"].(string)
-		if !ok || bodyStr == "[DONE]" {
+		bodyStr := unwrapUpstreamChunk(payload)
+		if bodyStr == "" {
 			continue
 		}
 		if collector != nil {
@@ -229,6 +237,41 @@ func clientNeedsSSEFrame(metadata map[string]any) bool {
 // them as a truncated tool call). Other empty-but-legal values are preserved:
 // content:"" is a valid delta (pure tool-call chunk) and the role-only first
 // chunk must survive so clients can establish the message role.
+// unwrapUpstreamChunk extracts the OpenAI chunk carried by one upstream SSE
+// data line.
+//
+// Qoder wraps each chunk as {"headers":{...},"body":"<json string>"}. Some
+// gateway builds emit the OpenAI chunk directly, or nest it under a different
+// key, so accept those too. Returning "" means the line carried no chunk.
+func unwrapUpstreamChunk(payload string) string {
+	payload = strings.TrimSpace(payload)
+	if payload == "" || payload == "[DONE]" {
+		return ""
+	}
+	var outer map[string]any
+	if json.Unmarshal([]byte(payload), &outer) != nil {
+		return ""
+	}
+	// Wrapped form: {"body": "<json>"} (current agent envelope).
+	for _, key := range []string{"body", "data", "chunk", "message"} {
+		if v, ok := outer[key].(string); ok {
+			v = strings.TrimSpace(v)
+			if v == "" || v == "[DONE]" {
+				continue
+			}
+			return v
+		}
+	}
+	// Unwrapped form: the payload already is an OpenAI chunk.
+	if _, ok := outer["choices"]; ok {
+		return payload
+	}
+	if _, ok := outer["error"]; ok {
+		return payload
+	}
+	return ""
+}
+
 func cleanChunkJSON(s string) string {
 	var obj map[string]any
 	if json.Unmarshal([]byte(s), &obj) != nil {

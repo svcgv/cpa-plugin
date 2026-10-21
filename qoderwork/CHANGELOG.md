@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.6 (qoderwork 0.5.8)
+
+### Diagnose and harden the streaming path (empty_stream)
+
+CPA reports `empty_stream: upstream stream closed before first payload` when a
+plugin's stream channel closes before the first chunk. The pump recognised only
+one upstream shape (`{"body":"<json>"}`) and silently `continue`d on anything
+else, so any envelope difference produced an empty stream with no diagnosis.
+
+- Add `unwrapUpstreamChunk`, accepting the agent envelope (`body`), alternate
+  nesting (`data`/`chunk`/`message`), an already-unwrapped OpenAI chunk, and
+  error frames. Used by both the async pump and the synchronous collector.
+- When the upstream answers 200 but no chunk is recognised, emit an explicit
+  error (`upstream produced no usable chunk (N unrecognised data lines)`)
+  instead of closing the stream silently. The reason now reaches the client and
+  the usage log.
+- Unit tests cover every accepted and rejected shape.
+
+
 ## 0.7.5 (qoderwork 0.5.7)
 
 ### Wire `oauth-model-alias` back to the upstream model key
