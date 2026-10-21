@@ -1,0 +1,21 @@
+qoderwork/models.go
+  s_a7da4029901b40::t_23516c26be3ab9 533-538,671-674,682
+qoderwork/models_test.go
+  s_a7da4029901b40::t_23516c26be3ab9 371-401
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4b97cdd1386e15e90be0bf654dbdb3a45c4b3a66",
+  "prompts": {},
+  "sessions": {
+    "s_a7da4029901b40": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15e74-3615-7e93-b7e9-499b778b07aa",
+        "model": "deepseek-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
