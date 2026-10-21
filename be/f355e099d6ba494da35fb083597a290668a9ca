@@ -1,0 +1,23 @@
+qoderwork/body.go
+  s_a7da4029901b40::t_e4a298b1afa651 345-372,417-422,453
+analysis/qorder/README.md
+  s_a7da4029901b40::t_3bef2ec7bdd4c7 71-98
+qoderwork/body_test.go
+  s_a7da4029901b40::t_549ed4d1869716 173-233
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bef355e099d6ba494da35fb083597a290668a9ca",
+  "prompts": {},
+  "sessions": {
+    "s_a7da4029901b40": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15e74-3615-7e93-b7e9-499b778b07aa",
+        "model": "deepseek-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
