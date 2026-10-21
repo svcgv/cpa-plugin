@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.7 (qoderwork 0.5.9)
+
+### Surface why a stream produced no output
+
+The async pump reported an empty stream only as CPA's generic
+`empty_stream: upstream stream closed before first payload`; the synchronous
+collector returned an empty chunk list with `err == nil`, which CPA also treats
+as an empty stream. Neither path explained what the upstream actually sent.
+
+- Async pump: on zero recognised chunks, emit
+  `upstream produced no usable chunk (N unrecognised data lines)`.
+- Sync collector: same error instead of a silent empty success, plus the host
+  logger records the first ~600 bytes of the raw upstream SSE.
+- `logPlugin` helper: writes through `host.log` when the bridge is available and
+  falls back to stderr in unit tests.
+
+
 ## 0.7.6 (qoderwork 0.5.8)
 
 ### Diagnose and harden the streaming path (empty_stream)

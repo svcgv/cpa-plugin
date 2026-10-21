@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"runtime"
 	"time"
 
@@ -412,4 +413,19 @@ func decodeHostHTTPResult(result []byte) (int, http.Header, []byte) {
 
 func decodeHostHTTPResultForTest(result []byte) (int, http.Header, []byte) {
 	return decodeHostHTTPResult(result)
+}
+
+// logPlugin writes a diagnostic line through the host logger. In unit tests
+// (no host bridge) it falls back to stderr so failures stay visible.
+func logPlugin(level, message string) {
+	body, err := json.Marshal(map[string]any{"level": level, "message": message})
+	if err != nil {
+		return
+	}
+	if hostBridgeAvailable() {
+		if _, err := hostCall(pluginabi.MethodHostLog, body); err == nil {
+			return
+		}
+	}
+	fmt.Fprintf(os.Stderr, "[qoderwork] %s: %s\n", level, message)
 }

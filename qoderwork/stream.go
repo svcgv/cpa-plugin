@@ -182,10 +182,15 @@ func collectUpstreamStreamQoder(encodedBody string, sa *storedAuth, modelKey str
 		return nil, statusCode, fmt.Errorf("upstream %d: %s", statusCode, truncateRedacted(string(payload), 200))
 	}
 	chunks := make([]pluginapi.ExecutorStreamChunk, 0, 64)
+	var syncRawPreview strings.Builder
 	scanner := bufio.NewScanner(newHostStreamReader(stream))
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
+		if syncRawPreview.Len() < 700 {
+			syncRawPreview.WriteString(line)
+			syncRawPreview.WriteString("\n")
+		}
 		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
@@ -211,6 +216,10 @@ func collectUpstreamStreamQoder(encodedBody string, sa *storedAuth, modelKey str
 	}
 	if err := scanner.Err(); err != nil {
 		return chunks, 0, fmt.Errorf("upstream stream read error: %w", err)
+	}
+	if len(chunks) == 0 {
+		logPlugin("warn", "qoderwork: sync stream produced no chunks; first data lines="+truncateRedacted(syncRawPreview.String(), 600))
+		return nil, 0, fmt.Errorf("upstream produced no usable chunk (status %d)", statusCode)
 	}
 	return chunks, 0, nil
 }
