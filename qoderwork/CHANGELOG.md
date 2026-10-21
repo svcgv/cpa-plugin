@@ -15,6 +15,9 @@ as an empty stream. Neither path explained what the upstream actually sent.
   logger records the first ~600 bytes of the raw upstream SSE.
 - `logPlugin` helper: writes through `host.log` when the bridge is available and
   falls back to stderr in unit tests.
+- Accept two more upstream shapes found while probing: a `payload` (or other
+  alternate key) envelope, and double-encoded SSE where the data line is a JSON
+  string holding the chunk. Wrapped strings are unwrapped recursively.
 
 
 ## 0.7.6 (qoderwork 0.5.8)

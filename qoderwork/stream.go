@@ -252,21 +252,57 @@ func clientNeedsSSEFrame(metadata map[string]any) bool {
 // Qoder wraps each chunk as {"headers":{...},"body":"<json string>"}. Some
 // gateway builds emit the OpenAI chunk directly, or nest it under a different
 // key, so accept those too. Returning "" means the line carried no chunk.
+// looksLikeWrappedChunk reports whether s is JSON that carries a nested chunk
+// string (e.g. {"body":"..."}), as opposed to a plain OpenAI chunk.
+func looksLikeWrappedChunk(s string) bool {
+	if !strings.HasPrefix(strings.TrimSpace(s), "{") {
+		return false
+	}
+	var m map[string]any
+	if json.Unmarshal([]byte(s), &m) != nil {
+		return false
+	}
+	if _, ok := m["choices"]; ok {
+		return false
+	}
+	for _, k := range []string{"body", "data", "chunk", "message", "payload"} {
+		if _, ok := m[k].(string); ok {
+			return true
+		}
+	}
+	return false
+}
+
 func unwrapUpstreamChunk(payload string) string {
 	payload = strings.TrimSpace(payload)
 	if payload == "" || payload == "[DONE]" {
+		return ""
+	}
+	// A JSON string containing the chunk (double-encoded SSE).
+	if strings.HasPrefix(payload, `"`) {
+		var inner string
+		if json.Unmarshal([]byte(payload), &inner) == nil {
+			return unwrapUpstreamChunk(inner)
+		}
 		return ""
 	}
 	var outer map[string]any
 	if json.Unmarshal([]byte(payload), &outer) != nil {
 		return ""
 	}
-	// Wrapped form: {"body": "<json>"} (current agent envelope).
-	for _, key := range []string{"body", "data", "chunk", "message"} {
+	// Wrapped form: {"body": "<json>"} (current agent envelope), plus the
+	// alternate keys other gateway builds use.
+	for _, key := range []string{"body", "data", "chunk", "message", "payload", "delta", "content"} {
 		if v, ok := outer[key].(string); ok {
 			v = strings.TrimSpace(v)
 			if v == "" || v == "[DONE]" {
 				continue
+			}
+			// A wrapped string may itself be a wrapped chunk.
+			if looksLikeWrappedChunk(v) {
+				if inner := unwrapUpstreamChunk(v); inner != "" {
+					return inner
+				}
 			}
 			return v
 		}

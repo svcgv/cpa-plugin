@@ -14,6 +14,11 @@ func TestUnwrapUpstreamChunk(t *testing.T) {
 		`{"message":"{\"choices\":[]}"}`: `{"choices":[]}`,
 		// Error frames are forwarded so the client sees them.
 		`{"error":{"message":"boom"}}`: `{"error":{"message":"boom"}}`,
+		// Alternate nesting keys used by other gateway builds.
+		`{"payload":"{\"choices\":[]}"}`:                   `{"choices":[]}`,
+		`{"event":"message","payload":"{\"choices\":[]}"}`: `{"choices":[]}`,
+		// Double-encoded SSE (a JSON string holding the chunk object).
+		`"{\"choices\":[]}"`: `{"choices":[]}`,
 		// Nothing usable.
 		`[DONE]`:  "",
 		`{}`:      "",
