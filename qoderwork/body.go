@@ -10,6 +10,10 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -143,6 +147,47 @@ func extractLatestUserPrompt(messages []openAIMessage) string {
 	return ""
 }
 
+// templateEnvRE matches the <env> block baked into baseprompt.json. That block
+// was captured from someone else's machine (D:/Projects/Qoder on Windows with
+// an empty date), so it must never reach an upstream request verbatim.
+var templateEnvRE = regexp.MustCompile(`(?s)<env>.*?</env>`)
+
+// applyEnvironment replaces the template's stale <env> block with this host's
+// real values. Everything else in the template is left untouched because the
+// gateway expects that prompt shape.
+func applyEnvironment(systemPrompt string) string {
+	var wd string
+	if dir, err := os.Getwd(); err == nil {
+		wd = dir
+	}
+	isRepo := "No"
+	if _, err := os.Stat(filepath.Join(wd, ".git")); err == nil {
+		isRepo = "Yes"
+	}
+	block := fmt.Sprintf("<env>\nWorking directory: %s\nIs directory a git repo: %s\nPlatform: %s\nOS Version: %s\nToday's date: %s\n</env>",
+		firstNonEmpty(wd, "unknown"),
+		isRepo,
+		runtime.GOOS,
+		buildMachineOS(),
+		time.Now().Format("2006-01-02"),
+	)
+	if templateEnvRE.MatchString(systemPrompt) {
+		return templateEnvRE.ReplaceAllLiteralString(systemPrompt, block)
+	}
+	return systemPrompt
+}
+
+// clientSystemText concatenates the client's own system messages.
+func clientSystemText(messages []openAIMessage) string {
+	var parts []string
+	for _, m := range messages {
+		if m.Role == "system" && strings.TrimSpace(m.Content) != "" {
+			parts = append(parts, m.Content)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
 // buildQoderBody renders the upstream agent_chat_generation body for one request.
 // modelKey is the upstream key (already mapped via cpaToUpstreamKey).
 func buildQoderBody(req *openAIRequest, modelKey, userType string) ([]byte, error) {
@@ -185,25 +230,38 @@ func buildQoderBody(req *openAIRequest, modelKey, userType string) ([]byte, erro
 		}
 	}
 
-	// messages: keep system prompt from baseprompt (template has it), replace user/assistant
-	var systemMsgs []any
-	if msgs, ok := base["messages"].([]any); ok {
+	// messages: the Qoder template system prompt is kept (the gateway expects
+	// that shape) but its <env> block is rewritten for this host. When the
+	// client ships its own agent prompt (Codex), it is placed FIRST so its
+	// identity and instructions are not overridden by "You are Qoder".
+	var out []any
+	client := clientSystemText(req.Messages)
+	if client != "" {
+		// Plan B: the client already ships a full agent prompt (Codex). Drop
+		// the Qoder template system prompt entirely so its identity, env and
+		// tool names cannot override the client's.
+		out = append(out, map[string]any{"role": "system", "content": client})
+	} else if msgs, ok := base["messages"].([]any); ok {
 		for _, m := range msgs {
-			if mm, ok := m.(map[string]any); ok {
-				if role, _ := mm["role"].(string); role == "system" {
-					systemMsgs = append(systemMsgs, m)
+			mm, ok := m.(map[string]any)
+			if !ok {
+				continue
+			}
+			if role, _ := mm["role"].(string); role == "system" {
+				if txt, _ := mm["content"].(string); txt != "" {
+					mm["content"] = applyEnvironment(txt)
 				}
+				out = append(out, mm)
 			}
 		}
 	}
-	// Append the actual conversation
 	for _, m := range req.Messages {
-		systemMsgs = append(systemMsgs, map[string]any{
-			"role":    m.Role,
-			"content": m.Content,
-		})
+		if m.Role == "system" {
+			continue // already emitted first
+		}
+		out = append(out, map[string]any{"role": m.Role, "content": m.Content})
 	}
-	base["messages"] = systemMsgs
+	base["messages"] = out
 
 	// business
 	if biz, ok := base["business"].(map[string]any); ok {

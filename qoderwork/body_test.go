@@ -70,3 +70,63 @@ func TestBuildQoderBodyWithContentParts(t *testing.T) {
 		t.Fatalf("model key missing in body")
 	}
 }
+
+// Codex ships its own system prompt. The Qoder template must not compete with
+// it, otherwise the model answers "I am Qoder" and uses Qoder's tool names.
+func TestClientSystemPromptReplacesQoderTemplate(t *testing.T) {
+	payload := []byte(`{"model":"qfmodel","messages":[
+		{"role":"system","content":"You are Codex, an OpenAI coding agent."},
+		{"role":"user","content":[{"type":"input_text","text":"hi"}]}
+	]}`)
+	var req openAIRequest
+	if err := json.Unmarshal(payload, &req); err != nil {
+		t.Fatal(err)
+	}
+	body, err := buildQoderBody(&req, "qfmodel", "personal_professional_trial")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		t.Fatal(err)
+	}
+	msgs, _ := m["messages"].([]any)
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %d want 2 (client system + user)", len(msgs))
+	}
+	first := msgs[0].(map[string]any)
+	if first["role"] != "system" || first["content"] != "You are Codex, an OpenAI coding agent." {
+		t.Fatalf("first message = %#v", first)
+	}
+	if len(msgs) > 1 {
+		if role := msgs[1].(map[string]any)["role"]; role != "user" {
+			t.Fatalf("second message role = %v", role)
+		}
+	}
+	joined, _ := json.Marshal(msgs)
+	for _, banned := range []string{"You are Qoder", "D:/Projects/Qoder", "MINGW64", "TodoWrite"} {
+		if strings.Contains(string(joined), banned) {
+			t.Fatalf("template leaked %q into a Codex request", banned)
+		}
+	}
+}
+
+// Requests without a client system prompt keep the Qoder template (the
+// gateway expects that shape) but with a rewritten <env> block.
+func TestTemplateEnvIsRewrittenForThisHost(t *testing.T) {
+	req := &openAIRequest{Model: "qfmodel", Messages: []openAIMessage{{Role: "user", Content: "hi"}}}
+	body, err := buildQoderBody(req, "qfmodel", "personal_professional_trial")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(body)
+	if strings.Contains(s, "D:/Projects/Qoder") || strings.Contains(s, "MINGW64") {
+		t.Fatal("stale template environment leaked")
+	}
+	if !strings.Contains(s, "Working directory: ") {
+		t.Fatal("env block missing")
+	}
+	if strings.Contains(s, "Today's date: <no value>") {
+		t.Fatal("date placeholder leaked")
+	}
+}

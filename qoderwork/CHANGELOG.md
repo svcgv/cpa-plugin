@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.7.3 (qoderwork 0.5.5)
+
+### Stop the Qoder template prompt from overriding Codex
+
+`baseprompt.json` carries a 12 KB "You are Qoder" system prompt that is sent on
+every CN chat. When Codex connected through CPA's Responses bridge, both system
+prompts were sent with Qoder's first, so the model answered "I am Qoder" and
+used Qoder's tool names (`Bash`/`TodoWrite`) instead of Codex's
+(`shell`/`apply_patch`).
+
+Two additional defects were found in that template:
+
+- Its `<env>` block was captured from someone else's machine:
+  `Working directory: D:/Projects/Qoder`, `Platform: windows`,
+  `OS Version: MINGW64_NT-10.0-22631`, `Today's date: <no value>`.
+- It hard-codes 14 Qoder CLI tool names and orders the model to use
+  `TodoWrite`, which Codex does not have.
+
+Tried in order, per the requested fallback plan:
+
+- Plan A (keep both prompts, client first, rewrite `<env>`): requests
+  succeeded, but the model still answered "我是 Qoder" — the template's
+  identity rules win because they are longer and more emphatic.
+- Plan B (client system prompt replaces the template): **adopted**. The model
+  now answers "我是 Codex，一个由 OpenAI 开发的编程代理" and picks `shell`.
+  Requests with no client system prompt still use the template, with a
+  rewritten `<env>` block.
+
+Implementation:
+
+- `clientSystemText` collects the client's own system messages.
+- When present, they replace the template system prompt entirely; the template
+  is still used for prompt-less clients, with `<env>` regenerated from this
+  host (working dir, git repo, platform, OS, today's date).
+- Added regression tests asserting no `You are Qoder`, `D:/Projects/Qoder`,
+  `MINGW64` or `TodoWrite` leaks into a Codex request.
+
+Verified end-to-end on a local CPA with a real CN account: identity, tool-name
+selection and a plain request all return HTTP 200 with correct content.
+
+
 ## 0.7.2 (qoderwork 0.5.4)
 
 ### Accept Codex/Responses content parts
