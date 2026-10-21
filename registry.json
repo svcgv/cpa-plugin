@@ -24,7 +24,7 @@
       "name": "QoderWork",
       "description": "QoderWork provider for CLIProxyAPI with two realms: CN (qoder.com.cn, COSY-signed agent chat, check-in, credits) and international (qoder.com, OpenAI-compatible Bearer chat). Panel OAuth device authorization with a region selector (copyable/retryable/cancellable) plus CN PAT import, realm-aware dynamic model discovery, daily check-in with credit snapshot (CN), token keepalive (prefix- and realm-routed), accounts panel with region badges, model-catalog diagnostics.",
       "author": "Sliverkiss",
-      "version": "0.5.3",
+      "version": "0.5.4",
       "repository": "https://github.com/Sliverkiss/cpa-plugin",
       "logo": "https://raw.githubusercontent.com/DGZSbot/ai-icon/refs/heads/main/QoderWork.png",
       "homepage": "https://github.com/Sliverkiss/cpa-plugin/tree/main/qoderwork",

@@ -6,9 +6,11 @@
 package main
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -46,9 +48,82 @@ func cpaToUpstreamKey(cpaModel string) string {
 }
 
 // openAIMessage is one message in the OpenAI chat completion format.
+//
+// Content is either a plain string or a list of typed parts. Codex (and the
+// OpenAI Responses API) send:
+//
+//	"content": [{"type":"input_text","text":"hi"}, ...]
+//
+// while classic Chat Completions send "content": "hi". Both must parse.
 type openAIMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+}
+
+// UnmarshalJSON accepts a string or an array of content parts. Parts may carry
+// "text" (input_text/output_text/text) or "input_text"/"output_text" variants;
+// non-text parts (images, tool results) are ignored, since the upstream agent
+// body only takes a prompt string.
+func (m *openAIMessage) UnmarshalJSON(raw []byte) error {
+	var probe struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return err
+	}
+	m.Role = probe.Role
+	m.Content = contentText(probe.Content)
+	return nil
+}
+
+// contentText flattens an OpenAI content value into plain text.
+func contentText(raw json.RawMessage) string {
+	v := bytes.TrimSpace(raw)
+	if len(v) == 0 || string(v) == "null" {
+		return ""
+	}
+	if v[0] == '"' {
+		var s string
+		if json.Unmarshal(v, &s) == nil {
+			return s
+		}
+		return ""
+	}
+	if v[0] != '[' {
+		return ""
+	}
+	var parts []json.RawMessage
+	if json.Unmarshal(v, &parts) != nil {
+		return ""
+	}
+	var out []string
+	for _, part := range parts {
+		var p struct {
+			Type    string          `json:"type"`
+			Text    string          `json:"text"`
+			Content json.RawMessage `json:"content"`
+			Input   string          `json:"input_text"`
+			Output  string          `json:"output_text"`
+		}
+		if json.Unmarshal(part, &p) != nil {
+			continue
+		}
+		switch {
+		case p.Text != "":
+			out = append(out, p.Text)
+		case p.Input != "":
+			out = append(out, p.Input)
+		case p.Output != "":
+			out = append(out, p.Output)
+		case len(p.Content) > 0:
+			// Nested {"type":"message","content":[...]} or {"content":"..."}
+			if nested := contentText(p.Content); nested != "" {
+				out = append(out, nested)
+			}
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // openAIRequest is the CPA-facing chat completion request.

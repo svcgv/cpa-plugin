@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.7.2 (qoderwork 0.5.4)
+
+### Accept Codex/Responses content parts
+
+Codex reaches the plugin through CPA's Responses bridge, which sends message
+content as a list of typed parts instead of a plain string:
+
+```json
+{"role":"user","content":[{"type":"input_text","text":"hi"}]}
+```
+
+`openAIMessage.Content` was declared `string`, so decoding failed with
+`json: cannot unmarshal array into Go struct field openAIRequest.messages.0.content
+of type string` and the request ended as HTTP 503
+`auth_unavailable: no auth available`.
+
+- `openAIMessage.UnmarshalJSON` now accepts a string, an array of content parts,
+  or nested message parts, flattening text with newlines.
+- Non-text parts (images, tool results) are ignored because the upstream agent
+  body only carries a prompt string.
+- Added regression tests for Codex-style content parts, output_text, nested
+  content and upstream body construction.
+
+Verified end-to-end on a local CPA with a real CN account: a content-part
+request to `qfmodel` returns HTTP 200 with a normal completion.
+
+
 ## 0.7.1 (qoderwork 0.5.3)
 
 ### Fix "only auto works": read the current catalog scene and stop sharing a stale cache
