@@ -1,0 +1,33 @@
+qoderwork/panel.html
+  s_d7fb9c3b674917::t_35fae1e82b7cee 933,1055
+registry.json
+  s_d7fb9c3b674917::t_35fae1e82b7cee 27
+qoderwork/main.go
+  s_d7fb9c3b674917::t_35fae1e82b7cee 337
+qoderwork/Makefile
+  s_d7fb9c3b674917::t_35fae1e82b7cee 4,14
+qoderwork/panel.test.js
+  s_d7fb9c3b674917::t_5cf5812b25928b 1-74
+qoderwork/VERSION
+  s_d7fb9c3b674917::t_35fae1e82b7cee 1
+.github/workflows/build.yml
+  s_d7fb9c3b674917::t_35fae1e82b7cee 57-63
+qoderwork/CHANGELOG.md
+  s_d7fb9c3b674917::t_35fae1e82b7cee 3-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4b3ecc862f2c0f5fdfa004583649d316ff236188",
+  "prompts": {},
+  "sessions": {
+    "s_d7fb9c3b674917": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1690d-23c6-7941-8d63-100a0541d814",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
