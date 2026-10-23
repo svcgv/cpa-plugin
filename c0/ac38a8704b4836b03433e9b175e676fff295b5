@@ -1,0 +1,23 @@
+registry.json
+  s_b1248721df4221::t_65422aec4b9625 9
+workbuddy/VERSION
+  s_b1248721df4221::t_fedb49a5aa145f 1
+workbuddy/main.go
+  s_b1248721df4221::t_708a27aa9dc318 346
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c0ac38a8704b4836b03433e9b175e676fff295b5",
+  "prompts": {},
+  "sessions": {
+    "s_b1248721df4221": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15e8a-2e5e-7112-a49c-32c5f8e21dfb",
+        "model": "deepseek-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
