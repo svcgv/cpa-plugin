@@ -930,7 +930,7 @@ async function startAddLogin(btn){
     const url=qwSafeURL(d);
     addSession={id:d.session_id,url:url};
     renderAddURL(url);
-    try{window.open(d.url,"_blank","noopener")}catch(_){}
+    try{window.open(url,"_blank","noopener")}catch(_){}
     pollAddLogin(attempt);
   }catch(e){
     if(attempt===addAttempt) setAddStatus(e.message||"发起登录失败","err");

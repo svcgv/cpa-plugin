@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.12 (2026-10-23)
+
+- Fix the account panel's automatic OAuth popup opening the HTML-escaped raw
+  URL, which turned query keys such as `nonce` into `amp;nonce` and caused
+  "参数无效". Automatic opening now uses the same decoded URL as manual opening
+  and copying.
+- Add CN/INTL regression coverage for encoded, HTML-escaped and plain login
+  responses, run by `make test` and CI.
+
 ## 0.7.8 (qoderwork 0.5.10, work in progress)
 
 ### Separate plan credits from resource-pack credits

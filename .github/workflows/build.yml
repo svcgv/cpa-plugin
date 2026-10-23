@@ -54,6 +54,13 @@ jobs:
         run: python3 scripts/validate-registry.py registry.json
       - name: Test
         run: go test ./...
+      - uses: actions/setup-node@v4
+        if: matrix.dir == 'qoderwork'
+        with:
+          node-version: '22'
+      - name: Test QoderWork panel
+        if: matrix.dir == 'qoderwork'
+        run: node --test panel.test.js
       - name: Vet
         run: go vet ./...
 
