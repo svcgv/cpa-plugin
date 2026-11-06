@@ -1,0 +1,39 @@
+workbuddy/main.go
+  s_4c56c613fd2e3b::t_3be4c802ca70ea 346
+workbuddy/VERSION
+  s_4c56c613fd2e3b::t_ff66a77be1c707 1
+workbuddy/rewards_execution_test.go
+  s_4c56c613fd2e3b::t_e913d652078fe0 1-101
+workbuddy/rewards.go
+  s_4c56c613fd2e3b::t_5a9d4615d8d596 230-231,233,451
+  s_4c56c613fd2e3b::t_72063d8c80ef2b 179-183,440,450
+  s_4c56c613fd2e3b::t_5adb445f18f7c2 171-178,186-193,229,232,234-236,435-439,441-442,444,452
+  s_4c56c613fd2e3b::t_1d5720fab2db39 184-185,453
+workbuddy/rewards_test.go
+  s_4c56c613fd2e3b::t_2f34bbad7c93cd 492-518,521-537
+  s_4c56c613fd2e3b::t_5a9d4615d8d596 519-520
+registry.json
+  s_4c56c613fd2e3b::t_3be4c802ca70ea 9
+workbuddy/panel.test.js
+  s_4c56c613fd2e3b::t_439653d9e714ed 696-727
+workbuddy/rewards_management.go
+  s_4c56c613fd2e3b::t_e235c966ef878f 224,227-228,256,259-265
+workbuddy/panel.html
+  s_4c56c613fd2e3b::t_ff66a77be1c707 218,222,810,962,1012
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e428fa4abd7220639057d2384e0913241b6b80ab",
+  "prompts": {},
+  "sessions": {
+    "s_4c56c613fd2e3b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17c7b-a500-7cd3-a068-e1cce62f21db",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
