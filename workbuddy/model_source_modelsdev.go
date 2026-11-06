@@ -205,6 +205,7 @@ func fetchModelsDevMetadata(etag, callbackID string, do modelHTTPDo) (modelsDevF
 }
 
 func cloneModelFacts(facts modelFacts) modelFacts {
+	facts.MaxInputContext = cloneInt64(facts.MaxInputContext)
 	facts.ContextLength = cloneInt64(facts.ContextLength)
 	facts.MaxCompletionTokens = cloneInt64(facts.MaxCompletionTokens)
 	facts.SupportedInputModalities = append([]string(nil), facts.SupportedInputModalities...)

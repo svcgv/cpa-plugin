@@ -33,21 +33,34 @@ func handlePanelModelStatus() map[string]any {
 		if snap.ErrorCode != modelErrorNone {
 			row["error"] = snap.ErrorCode
 		}
-		rates := make(map[string]string, len(snap.CatalogFacts))
-		for _, fact := range snap.CatalogFacts {
-			rates[fact.ID] = fact.Credits
-		}
-		models := make([]map[string]any, 0, len(snap.Models))
-		for _, model := range snap.Models {
-			models = append(models, map[string]any{"id": model.ID, "name": model.Name, "credits": rates[model.ID]})
-		}
-		row["models"] = models
+		row["models"] = panelModelsForSnapshot(snap)
 		if failure, ok := panelModelRefreshErrors.Load(f.AuthIndex); ok {
 			row["error"] = failure
 		}
 		accounts = append(accounts, row)
 	}
 	return map[string]any{"accounts": accounts}
+}
+
+// panelModelsForSnapshot keeps pricing and context metadata tied to the same
+// account snapshot without changing the host's advertised model contract.
+func panelModelsForSnapshot(snap modelReadinessSnapshot) []map[string]any {
+	facts := make(map[string]modelFacts, len(snap.CatalogFacts))
+	for _, fact := range snap.CatalogFacts {
+		facts[fact.ID] = fact
+	}
+	models := make([]map[string]any, 0, len(snap.Models))
+	for _, model := range snap.Models {
+		fact := facts[model.ID]
+		row := map[string]any{"id": model.ID, "name": model.Name, "credits": fact.Credits}
+		if fact.MaxInputContext != nil && *fact.MaxInputContext > 0 {
+			row["max_context"] = *fact.MaxInputContext
+		} else if model.ContextLength > 0 {
+			row["max_context"] = model.ContextLength
+		}
+		models = append(models, row)
+	}
+	return models
 }
 
 func refreshPanelModels(callbackID string) map[string]any {

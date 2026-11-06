@@ -61,11 +61,11 @@ button.sec{background:var(--btn-sec);color:var(--fg)}button.sec:hover{background
 .model-account-heading{font-weight:600;margin-bottom:4px;overflow-wrap:anywhere}
 .model-account-meta{color:var(--mut);font-size:12px;margin-bottom:8px;overflow-wrap:anywhere}
 .model-table-wrap{max-width:100%;overflow-x:auto;border:1px solid var(--border);border-radius:8px}
-.model-table{width:100%;min-width:520px;table-layout:fixed;border-collapse:collapse;text-align:left;font-size:13px}
+.model-table{width:100%;min-width:760px;table-layout:fixed;border-collapse:collapse;text-align:left;font-size:13px}
 .model-table th,.model-table td{padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:top;overflow-wrap:anywhere}
 .model-table th{background:var(--surface);color:var(--mut);font-size:12px;font-weight:600;white-space:nowrap}
 .model-table tr:last-child td{border-bottom:0}
-.model-table th:nth-child(1){width:32%}.model-table th:nth-child(2){width:48%}.model-table th:nth-child(3){width:20%}
+.model-table th:nth-child(1){width:20%}.model-table th:nth-child(2){width:29%}.model-table th:nth-child(3),.model-table th:nth-child(4){width:17%}.model-table th:nth-child(5){width:17%}
 .model-table .model-id{color:var(--mut);font-family:ui-monospace,monospace;font-size:12px}
 .model-table .model-rate{white-space:nowrap;font-weight:600}
 .model-table-empty{color:var(--mut);padding:12px}
@@ -424,7 +424,7 @@ function markTrialDone(btn){
   btn.dataset.orig="已领取";
 }
 function fmtRemain(c){if(!c)return "-";const t=(c.total_remain||0)+(c.total_used||0);return c.total_remain+" 余 / "+t+" 总"}
-function esc(s){return (s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function progressHTML(c){
   // total uses size when known; remain = spendable, used = cycle spend.
   // Check-in adds packs → size/remain go UP (grant). Chat spend → used goes UP, remain DOWN.
@@ -809,9 +809,9 @@ function renderModelRates(result){
   if(!accounts.length){el.textContent='暂无账号';return}
   el.innerHTML=accounts.map(a=>{
     const label=(a.name||a.auth_index||'账号')+' · '+(a.region||'未知');
-    const rows=(a.models||[]).map(m=>'<tr><td>'+esc(m.name||m.id)+'</td><td class="model-id">'+esc(m.id)+'</td><td class="model-rate">'+esc(workbuddyRate(m.credits))+'</td></tr>').join('');
+    const rows=(a.models||[]).map(m=>'<tr><td>'+esc(m.name||m.id)+'</td><td class="model-id">'+esc(m.id)+'</td><td>'+esc(m.default_context??'未提供')+'</td><td>'+esc(m.max_context??'未提供')+'</td><td class="model-rate">'+esc(workbuddyRate(m.credits))+'</td></tr>').join('');
     return '<section class="model-account"><div class="model-account-heading">'+esc(label)+'</div><div class="model-account-meta">来源：'+esc(a.source||'未知')+(a.fetched_at?' · '+esc(a.fetched_at):'')+(a.error?' · 刷新异常：'+esc(a.error):'')+'</div>'+
-      (rows?'<div class="model-table-wrap" role="region" tabindex="0" aria-label="'+esc(label)+' 模型与积分倍率"><table class="model-table"><thead><tr><th scope="col">模型</th><th scope="col">模型 ID</th><th scope="col">积分倍率</th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<div class="model-table-empty">模型目录尚未就绪</div>')+'</section>';
+      (rows?'<div class="model-table-wrap" role="region" tabindex="0" aria-label="'+esc(label)+' 模型与积分倍率"><table class="model-table"><thead><tr><th scope="col">模型</th><th scope="col">模型 ID</th><th scope="col">默认上下文</th><th scope="col">最大上下文</th><th scope="col">积分倍率</th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<div class="model-table-empty">模型目录尚未就绪</div>')+'</section>';
   }).join('');
 }
 async function openModelRates(){

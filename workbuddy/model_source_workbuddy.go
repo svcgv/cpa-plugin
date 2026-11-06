@@ -17,6 +17,7 @@ const modelSourceRequestTimeout = 15 * time.Second
 type modelFacts struct {
 	ID                        string   `json:"id"`
 	Credits                   string   `json:"credits,omitempty"`
+	MaxInputContext           *int64   `json:"max_input_context,omitempty"`
 	Name                      string   `json:"name,omitempty"`
 	Description               string   `json:"description,omitempty"`
 	ContextLength             *int64   `json:"context_length,omitempty"`
@@ -152,22 +153,34 @@ func parseWorkBuddyV3Config(raw []byte) ([]modelFacts, error) {
 		return nil, fmt.Errorf("v3 config cli agent is missing")
 	}
 
-	creditsByID := make(map[string]string)
+	type panelModelDetails struct {
+		credits         string
+		maxInputContext *int64
+	}
+	detailsByID := make(map[string]panelModelDetails)
 	var entries []json.RawMessage
 	_ = json.Unmarshal(response.Data.Models, &entries)
 	for _, raw := range entries {
 		var m struct {
-			ID      string          `json:"id"`
-			Credits json.RawMessage `json:"credits"`
+			ID             string          `json:"id"`
+			Credits        json.RawMessage `json:"credits"`
+			MaxInputTokens json.RawMessage `json:"maxInputTokens"`
 		}
 		if json.Unmarshal(raw, &m) == nil {
-			creditsByID[strings.TrimSpace(m.ID)] = parseModelCredits(m.Credits)
+			var maxInput int64
+			var maxPtr *int64
+			if json.Unmarshal(m.MaxInputTokens, &maxInput) == nil && maxInput > 0 {
+				maxPtr = &maxInput
+			}
+			detailsByID[strings.TrimSpace(m.ID)] = panelModelDetails{credits: parseModelCredits(m.Credits), maxInputContext: maxPtr}
 		}
 	}
 	models := make([]modelFacts, len(modelIDs))
 	for i, id := range modelIDs {
 		models[i].ID = id
-		models[i].Credits = creditsByID[strings.TrimSpace(id)]
+		details := detailsByID[strings.TrimSpace(id)]
+		models[i].Credits = details.credits
+		models[i].MaxInputContext = details.maxInputContext
 	}
 	return validateModelFacts(models)
 }

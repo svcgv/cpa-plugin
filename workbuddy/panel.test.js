@@ -807,12 +807,15 @@ test("a per-action reward button sends exactly that action", async () => {
 test("model rates render account-specific values and escape upstream text", () => {
   const { context, elements } = loadPanel();
   context.renderModelRates({ accounts: [{ name: '<account>', region: 'cn', source: 'cache', models: [
-    { id: 'a', name: '<model>', credits: 'x0.05' }, { id: 'b', credits: '' },
+    { id: 'a', name: '<model>', credits: 'x0.05', max_context: 200000 }, { id: 'b', credits: '' },
     { id: 'c', credits: '<b>promo</b>' },
   ] }] });
   const html = elements.get('modelRatesContent').innerHTML;
   assert.match(html, /&lt;account&gt;/); assert.match(html, /<table class="model-table">/);
   assert.match(html, /<th scope="col">模型 ID<\/th>/);
-  assert.match(html, /&lt;model&gt;<\/td><td class="model-id">a<\/td><td class="model-rate">0.05×/);
+  assert.match(html, /<th scope="col">默认上下文<\/th>/);
+  assert.match(html, /<th scope="col">最大上下文<\/th>/);
+  assert.match(html, /&lt;model&gt;<\/td><td class="model-id">a<\/td><td>未提供<\/td><td>200000<\/td><td class="model-rate">0.05×/);
+  assert.equal(context.esc(0), "0");
   assert.match(html, /未提供/); assert.match(html, /&lt;b&gt;promo&lt;\/b&gt;/);
 });

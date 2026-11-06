@@ -761,6 +761,9 @@ func cloneModelInfos(models []pluginapi.ModelInfo) []pluginapi.ModelInfo {
 func cloneModelReadinessSnapshot(snapshot modelReadinessSnapshot) modelReadinessSnapshot {
 	snapshot.Models = cloneModelInfos(snapshot.Models)
 	snapshot.CatalogFacts = append([]modelFacts(nil), snapshot.CatalogFacts...)
+	for i := range snapshot.CatalogFacts {
+		snapshot.CatalogFacts[i] = cloneModelFacts(snapshot.CatalogFacts[i])
+	}
 	return snapshot
 }
 
