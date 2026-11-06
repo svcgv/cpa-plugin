@@ -1,0 +1,74 @@
+workbuddy/main.go
+  s_86e831182f93cb::t_1131968c8cf9d1 346
+qoderwork/panel_models_test.go
+  s_86e831182f93cb::t_1d33a3b9abaf07 1-49
+qoderwork/models.go
+  s_86e831182f93cb::t_9e390be97bb02c 14,523-537,804-805,812-813,815-823,827-829,837-839,841-843,846-854,856-857,859-861,863-865,870-873
+  s_86e831182f93cb::t_f1592fe6dee9f8 766-770,824-826,855,858
+  s_86e831182f93cb::t_de64082ccd941b 773-774,783-792,814
+  s_86e831182f93cb::t_972b2737386b92 835,844-845,862,866-869,874-879
+workbuddy/model_source_workbuddy.go
+  s_86e831182f93cb::t_95c9d21fa3ee7d 19,111-113,155,170,196
+  s_86e831182f93cb::t_3c647b24884da6 102-108,114-118,164-166
+  s_86e831182f93cb::t_83d818292d53bb 109-110,126,156-163
+workbuddy/panel_models_test.go
+  s_86e831182f93cb::t_6ad9e66bc00627 47-77,83-92
+  s_86e831182f93cb::t_8d9f3965288ff2 78-82
+  s_86e831182f93cb::t_1d33a3b9abaf07 1-34,36-46
+  s_86e831182f93cb::t_56ceeb753c33c6 35
+qoderwork/panel.html
+  s_86e831182f93cb::t_972b2737386b92 232
+  s_86e831182f93cb::t_2afdc73fe2985e 61,66
+  s_86e831182f93cb::t_f5b736a7845d9a 224-225,826-833,835-836,843-845,847-856,870
+  s_86e831182f93cb::t_1131968c8cf9d1 56-60,62-65,67-70,834,837-842
+  s_86e831182f93cb::t_f1592fe6dee9f8 846,867
+workbuddy/panel.html
+  s_86e831182f93cb::t_f5b736a7845d9a 236-238,240,798-809,816-829
+  s_86e831182f93cb::t_1131968c8cf9d1 59-63,65-67,69-72,810-815
+  s_86e831182f93cb::t_2afdc73fe2985e 64,68
+  s_86e831182f93cb::t_972b2737386b92 239
+workbuddy/panel.test.js
+  s_86e831182f93cb::t_1d33a3b9abaf07 806-813,817-818
+  s_86e831182f93cb::t_df1b798a054737 814-816
+workbuddy/panel_models.go
+  s_86e831182f93cb::t_56ceeb753c33c6 74
+  s_86e831182f93cb::t_de64082ccd941b 9-10,45-47,70,73
+  s_86e831182f93cb::t_3c647b24884da6 1-8,11-44,48-69,71-72,75-79
+qoderwork/panel.test.js
+  s_86e831182f93cb::t_df1b798a054737 58,69-71
+  s_86e831182f93cb::t_1d33a3b9abaf07 61-68,72-73
+registry.json
+  s_86e831182f93cb::t_1131968c8cf9d1 9,27
+workbuddy/management.go
+  s_86e831182f93cb::t_95c9d21fa3ee7d 177-178,243-246
+workbuddy/model_readiness.go
+  s_86e831182f93cb::t_95c9d21fa3ee7d 64,427,763
+  s_86e831182f93cb::t_56ceeb753c33c6 235-238,289-290,313-314
+  s_86e831182f93cb::t_8d9f3965288ff2 503-514
+  s_86e831182f93cb::t_f0853a12780eac 315
+qoderwork/main.go
+  s_86e831182f93cb::t_1131968c8cf9d1 337
+qoderwork/panel_models.go
+  s_86e831182f93cb::t_f1592fe6dee9f8 10-11
+  s_86e831182f93cb::t_9e390be97bb02c 1-9,12-55
+qoderwork/VERSION
+  s_86e831182f93cb::t_a6151222ccb72c 1
+workbuddy/VERSION
+  s_86e831182f93cb::t_3670d6c3dfcad9 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4ec048028af84b97ddfb7d52daafba722a7e4c15",
+  "prompts": {},
+  "sessions": {
+    "s_86e831182f93cb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1af75-640f-78e0-b1d1-a62ee7e585e2",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
