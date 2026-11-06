@@ -215,11 +215,11 @@ button .spin{border-color:var(--on-acc);border-top-color:transparent}
     <button id="refreshBtn" onclick="load(true,this)">刷新数据</button>
     <button class="sec" onclick="runRewards('',this)">一键领取全部成长奖励</button>
     <button class="sec" onclick="openRewardSettings()">奖励设置</button>
-    <label class="toggle" title="CN 账号按北京时间 00:05 起每四小时轮询"><input type="checkbox" id="rewardAutoToggle" onchange="toggleRewardAuto(this.checked)"> 自动成长奖励</label>
+    <label class="toggle" title="北京时间 00:05、01:05、05:05、09:05、13:05、17:05、21:05"><input type="checkbox" id="rewardAutoToggle" onchange="toggleRewardAuto(this.checked)"> 自动成长奖励</label>
     <span class="toggle" id="rewardActionBar"></span>
     <span class="toggle" id="svtime"></span>
   </div>
-  <details class="card" style="margin-bottom:16px"><summary>成长中心领取记录</summary><div id="rewardResults" role="status" style="white-space:pre-wrap;overflow-wrap:anywhere">尚未执行</div></details>
+  <details class="card" style="margin-bottom:16px"><summary>成长中心领取记录</summary><div id="rewardResults" role="status" style="white-space:pre-wrap;overflow-wrap:anywhere">正在加载领取记录…</div></details>
   <div class="filter-bar" id="filterBar">
     <button type="button" class="ftag active" data-region="all" onclick="filterRegion('all',this)">全部 <span class="cnt" id="cntAll">0</span></button>
     <button type="button" class="ftag" data-region="cn" onclick="filterRegion('cn',this)">CN <span class="cnt" id="cntCn">0</span></button>
@@ -807,6 +807,7 @@ async function load(force, btn){
       if(force) toast("刷新失败", "err", "请求失败");
       return true;
     }
+    await loadRewardStatus();
     const accounts=d.accounts||[];
     lastAccounts=accounts;
     activeAuthId=d.active_auth||"";
@@ -958,7 +959,7 @@ function renderRewardStatus(d){
   el.textContent=(d.results||[]).filter(r=>serverAccounts.has(r.auth_index)).map(r=>
     (r.nickname||r.name||r.auth_index)+(r.running?" · 执行中":r.success?" · 完成":" · 部分步骤失败")+
     (r.needs_attention?" · 需要处理":"")+(r.credits_gained?" · +"+r.credits_gained+" 积分":"")+
-    (r.finished_at?" · "+r.finished_at:"")+"\n"+
+    (r.started_at?" · 开始 "+r.started_at:"")+(r.finished_at?" · 结束 "+r.finished_at:"")+"\n"+
     (r.steps||[]).map(s=>"  "+s.action+" · "+s.status+" · "+s.message).join("\n")
   ).join("\n\n")||"尚未执行";
 }
@@ -1008,7 +1009,7 @@ async function toggleRewardAuto(on){
   try{
     const accounts=Object.assign({},(rewardStatusCache&&rewardStatusCache.config_accounts)||{});
     await saveRewardSettings({auto:on,actions:Object.assign({},rewardStatusCache&&rewardStatusCache.actions||{}),accounts},d=>d.auto===on);
-    toast("自动成长奖励已"+(on?"开启":"关闭"),"ok","北京时间 00:05 起每四小时轮询");
+    toast("自动成长奖励已"+(on?"开启":"关闭"),"ok","北京时间 00:05、01:05、05:05、09:05、13:05、17:05、21:05");
   }catch(e){
     const at=document.getElementById("rewardAutoToggle");if(at)at.checked=!on;
     toast("设置失败","err",e.message);

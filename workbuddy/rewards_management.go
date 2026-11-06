@@ -221,9 +221,11 @@ func filterEnabledActions(actions []rewardAction, enabled map[rewardAction]bool)
 }
 
 func executeRewardAccount(f pluginapi.HostAuthFileEntry, sa *storedAuth, actions []rewardAction, automatic bool) {
+	startedAt := time.Now().Format(time.RFC3339)
 	rewardAccountSlots <- struct{}{}
 	defer func() { <-rewardAccountSlots }()
-	result := rewardResult{AuthIndex: f.AuthIndex, AuthID: f.ID, Name: f.Name, Nickname: sa.Account.Nickname, UID: sa.Account.UID, Success: true}
+	result := rewardResult{AuthIndex: f.AuthIndex, AuthID: f.ID, Name: f.Name, Nickname: sa.Account.Nickname, UID: sa.Account.UID, Success: true, StartedAt: startedAt}
+	refreshCredits := false
 	withCheckinLock(f.AuthIndex, func() {
 		// Re-check region after acquiring the lock: credentials can be replaced
 		// while a run is queued. Never let a stale CN snapshot reach upstream.
@@ -251,11 +253,16 @@ func executeRewardAccount(f pluginapi.HostAuthFileEntry, sa *storedAuth, actions
 		// never included in a bulk reconcile from the reward scheduler.
 		if wrote {
 			accountCache.Delete(f.ID)
-			if lifecycleEnabled() {
-				_, _ = reconcileOneAccount(f.AuthIndex, f.ID, true)
-			}
+			refreshCredits = true
 		}
 	})
+	// Lifecycle writes (sync note, disable, re-enable) acquire checkinLockFor
+	// themselves. Calling reconcile while holding that same non-reentrant
+	// mutex deadlocks after a successful reward and blocks every later run,
+	// manual check-in and token refresh for this account.
+	if refreshCredits && lifecycleEnabled() {
+		_, _ = reconcileOneAccount(f.AuthIndex, f.ID, true)
+	}
 	if result.Steps == nil {
 		result.Steps = []rewardStep{}
 	}

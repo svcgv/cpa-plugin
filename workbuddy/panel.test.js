@@ -693,6 +693,38 @@ test("CN cards expose the reward action and international cards do not", () => {
   }
 });
 
+test("loading the panel reads reward switches and results without submitting a claim", async () => {
+  const { context, elements, storage, document } = loadPanel();
+  storage.set("workbuddy-mgmt-key", "test-key");
+  document.getElementById("rewardAutoToggle").checked = false;
+  const calls = [];
+  context.api = async (url, options) => {
+    calls.push({ url, method: options?.method || "GET" });
+    if (url === "/accounts") return { accounts: [] };
+    if (url === "/rewards/status") return {
+      auto: true,
+      actions: { checkin: true, travel: true },
+      results: [{ auth_index: "cn-1", nickname: "CN test", success: true,
+        started_at: "2026-10-27T13:05:00+08:00", finished_at: "2026-10-27T13:05:02+08:00",
+        steps: [{ action: "checkin", status: "success", message: "签到成功" }] }],
+    };
+    throw new Error("unexpected request " + url);
+  };
+  assert.equal(await context.load(false), true);
+  assert.equal(elements.get("rewardAutoToggle").checked, true);
+  assert.match(elements.get("rewardResults").textContent, /CN test.*完成/);
+  assert.match(elements.get("rewardResults").textContent, /签到成功/);
+  assert.deepEqual(calls.map(c => c.url), ["/accounts", "/rewards/status"]);
+  assert.ok(calls.every(c => c.method === "GET"));
+});
+
+test("running reward results show their start time", () => {
+  const { context, elements } = loadPanel();
+  context.renderRewardStatus({ results: [{ auth_index: "cn-1", running: true,
+    started_at: "2026-10-27T13:05:00+08:00", steps: [] }] });
+  assert.match(elements.get("rewardResults").textContent, /开始.*2026-10-27T13:05:00\+08:00/);
+});
+
 test("CN per-reward actions stay collapsed behind one compact menu", () => {
   const { context } = loadPanel();
   const html = context.card({ auth_index: "cn-1", region: "cn", service: "cn" });

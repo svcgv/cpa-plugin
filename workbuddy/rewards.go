@@ -168,12 +168,29 @@ func rewardToken() (string, error) {
 }
 
 type rewardRunner struct {
-	ctx         context.Context
-	sa          *storedAuth
-	manual      bool
-	result      rewardResult
-	wrote       bool
-	callForTest func(context.Context, string, string, any) (map[string]any, error)
+	ctx    context.Context
+	sa     *storedAuth
+	manual bool
+	result rewardResult
+	wrote  bool
+	// noBuddy records that upstream refused a Buddy-only action because the
+	// account has never created a Buddy. That is a one-time setup step for the
+	// user, not a transient failure of this run.
+	noBuddy bool
+	// taskBuddyBlocked means the task list itself was refused for the same
+	// missing-Buddy prerequisite, so the summary belongs to the task action.
+	taskBuddyBlocked bool
+	callForTest      func(context.Context, string, string, any) (map[string]any, error)
+}
+
+// isMissingBuddyMessage reports the upstream prerequisite that only a created
+// Buddy can satisfy. The client exposes no create API, so retrying cannot fix
+// it and every later task inherits the same prerequisite.
+func isMissingBuddyMessage(msg string) bool {
+	m := strings.ToLower(msg)
+	return strings.Contains(m, "no active buddy") ||
+		strings.Contains(m, "first_buddy") ||
+		(strings.Contains(m, "no buddy") && strings.Contains(m, "instance"))
 }
 
 func (r *rewardRunner) note(action, status, message string) {
@@ -207,6 +224,14 @@ func (r *rewardRunner) request(action, method, path string, body any) (map[strin
 			path == "/lottery/draw" && apiErr.Status == 400 && (strings.Contains(msg, "no chance") || (strings.Contains(msg, "insufficient") || strings.Contains(msg, "not enough")) && (strings.Contains(msg, "chance") || strings.Contains(msg, "balance")))
 		if benign {
 			r.note(action, "skipped", apiErr.Message)
+			return nil, false
+		}
+		if isMissingBuddyMessage(apiErr.Message) {
+			// Keep the account flagged for user action, but collapse the
+			// repeated upstream prerequisite into one readable setup note.
+			r.noBuddy = true
+			r.result.NeedsAttention = true
+			r.note(action, "skipped", "需要先在 WorkBuddy 创建 Buddy")
 			return nil, false
 		}
 	}
@@ -407,12 +432,24 @@ func (r *rewardRunner) tasks() {
 			row, _ := v.(map[string]any)
 			status := rewardString(row, "status")
 			code := rewardString(row, "task_code")
+			message := rewardString(row, "message")
+			if isMissingBuddyMessage(message) {
+				// One missing Buddy blocks every task at once; report it once
+				// below instead of one red row per task.
+				r.noBuddy = true
+				r.taskBuddyBlocked = true
+				continue
+			}
 			if status == "error" || status == "" {
-				r.note(string(rewardTasks), "error", code+" "+truncateRedacted(rewardString(row, "message"), 160))
+				r.note(string(rewardTasks), "error", code+" "+truncateRedacted(message, 160))
 			} else {
 				r.note(string(rewardTasks), "success", "已领取任务 "+code)
 			}
 		}
+	}
+	if r.taskBuddyBlocked {
+		r.result.NeedsAttention = true
+		r.note(string(rewardTasks), "skipped", "需要先在 WorkBuddy 创建 Buddy；创建后任务奖励自动恢复")
 	}
 	for _, v := range tasks {
 		t, _ := v.(map[string]any)

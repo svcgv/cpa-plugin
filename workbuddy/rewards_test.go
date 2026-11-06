@@ -489,3 +489,49 @@ func TestRewardRunFiltersDisabledActionForManualRequest(t *testing.T) {
 		t.Fatalf("disabled action leaked into manual selection: %v", selected)
 	}
 }
+
+func TestRewardRunnerTreatsMissingBuddyAsSetupNotFailure(t *testing.T) {
+	call := func(_ context.Context, method, path string, _ any) (map[string]any, error) {
+		switch path {
+		case "/buddy/travel/status":
+			return nil, &rewardAPIError{Status: 403, Message: "no active buddy"}
+		case "/tasks":
+			return map[string]any{"tasks": []any{
+				map[string]any{"task_code": "first_buddy", "accept_status": "not_accepted"},
+				map[string]any{"task_code": "chat_5", "accept_status": "not_accepted"},
+			}}, nil
+		case "/tasks/accept":
+			return map[string]any{"results": []any{
+				map[string]any{"task_code": "first_buddy", "status": "error", "message": "first_buddy task does not require acceptance"},
+				map[string]any{"task_code": "chat_5", "status": "error", "message": "prerequisite not met: first_buddy"},
+			}}, nil
+		case "/streak":
+			return map[string]any{"makeup_cards": map[string]any{"balance": float64(0)}}, nil
+		}
+		return map[string]any{}, nil
+	}
+	r := &rewardRunner{ctx: context.Background(), sa: &storedAuth{}, result: rewardResult{Success: true}, manual: true,
+		callForTest: func(ctx context.Context, method, path string, body any) (map[string]any, error) {
+			return call(ctx, method, path, body)
+		}}
+	r.travel()
+	r.tasks()
+	if !r.result.Success || !r.result.NeedsAttention {
+		t.Fatalf("missing Buddy must stay actionable without a transient failure: %#v", r.result)
+	}
+	if !r.noBuddy {
+		t.Fatal("missing Buddy was not detected")
+	}
+	var setupNotes int
+	for _, step := range r.result.Steps {
+		if strings.Contains(step.Message, "创建 Buddy") && step.Status == "skipped" {
+			setupNotes++
+		}
+		if step.Status == "error" {
+			t.Fatalf("unexpected error step for a setup prerequisite: %#v", step)
+		}
+	}
+	if setupNotes < 2 {
+		t.Fatalf("expected travel and task setup notes, got %#v", r.result.Steps)
+	}
+}
