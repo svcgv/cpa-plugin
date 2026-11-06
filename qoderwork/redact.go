@@ -14,6 +14,7 @@ var (
 	// no Bearer prefix, no access_token key. Two-segment and three-segment both
 	// match (some upstreams return header.payload only when signature is empty).
 	redactREJWTLoose = regexp.MustCompile(`\beyJ[A-Za-z0-9_\-]{8,}(?:\.[A-Za-z0-9_\-]{4,}){1,2}\b`)
+	redactREPersonal = regexp.MustCompile(`\b(?:pt|jt|jrt|dt|drt)-[A-Za-z0-9_\-]{12,}\b`)
 )
 
 // redactSecrets strips bearer tokens / JWT-like blobs from error bodies before usage publish.
@@ -29,6 +30,7 @@ func redactSecrets(s string) string {
 	s = redactRETokenKV.ReplaceAllString(s, "${1}***")
 	// loose JWT fallback: bare header.payload(.sig) without Bearer / kv context
 	s = redactREJWTLoose.ReplaceAllString(s, "***jwt***")
+	s = redactREPersonal.ReplaceAllString(s, "***token***")
 	return s
 }
 

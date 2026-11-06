@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.14 (2026-11-06)
+
+- Register readable `qoder/` model IDs based on the live model display names,
+  keeping the upstream model key internal and isolating names from other CPA providers.
+- Translate Codex reasoning levels to the nearest upstream-advertised level;
+  when no levels are declared, keep the provider default instead of rejecting the request.
+- Existing clients should select the new `qoder/` IDs or update their configured aliases.
+
+## 0.5.13 (2026-11-05)
+
+- Switch CN and international accounts to region-specific PAT exchange and COSY agent transport. Preserve old account records and ask for PAT when missing.
+- Support campaign check-in in both regions and select model context windows by region.
+- Preserve tool calls, tool results, images and reasoning history through chat conversion; keep model catalogs isolated by account.
+- Stream direct HTTP responses incrementally instead of waiting for the server to close the connection.
+
 ## 0.5.12 (2026-10-23)
 
 - Fix the account panel's automatic OAuth popup opening the HTML-escaped raw

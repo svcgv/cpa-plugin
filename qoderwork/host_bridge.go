@@ -34,6 +34,7 @@ func sharedHTTPClient() *http.Client {
 		sharedClient = &http.Client{
 			Timeout: 120 * time.Second,
 			Transport: &http.Transport{
+				Proxy:               http.ProxyFromEnvironment,
 				MaxIdleConns:        20,
 				IdleConnTimeout:     90 * time.Second,
 				MaxIdleConnsPerHost: 5,
@@ -192,9 +193,10 @@ func hostHTTPDoDirect(req *http.Request, bodyBytes []byte) (*hostHTTPResponse, e
 //   - Direct (test fallback): direct holds the full buffered body, Read drains
 //     it once then reports done. Close is a no-op.
 type hostHTTPStream struct {
-	streamID string
-	direct   []byte
-	directAt int
+	streamID   string
+	direct     []byte
+	directAt   int
+	directBody io.ReadCloser
 }
 
 // hostHTTPDoStream opens a streaming call via the host bridge. The host owns
@@ -258,12 +260,7 @@ func hostHTTPDoStreamDirect(req *http.Request, bodyBytes []byte) (*hostHTTPStrea
 	if err != nil {
 		return nil, 0, nil, err
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, resp.StatusCode, resp.Header.Clone(), err
-	}
-	return &hostHTTPStream{direct: raw}, resp.StatusCode, resp.Header.Clone(), nil
+	return &hostHTTPStream{directBody: resp.Body}, resp.StatusCode, resp.Header.Clone(), nil
 }
 
 // Read pulls the next chunk. Returns (payload, done, err). done=true means the
@@ -271,6 +268,20 @@ func hostHTTPDoStreamDirect(req *http.Request, bodyBytes []byte) (*hostHTTPStrea
 func (s *hostHTTPStream) Read() ([]byte, bool, error) {
 	if s == nil {
 		return nil, true, fmt.Errorf("stream closed")
+	}
+	if s.directBody != nil {
+		buf := make([]byte, 32*1024)
+		n, err := s.directBody.Read(buf)
+		if n > 0 {
+			return buf[:n], false, nil
+		}
+		if err == io.EOF {
+			return nil, true, nil
+		}
+		if err != nil {
+			return nil, true, err
+		}
+		return nil, false, nil
 	}
 	// Direct (test fallback) mode: serve the buffered body in one shot.
 	if s.direct != nil {
@@ -305,6 +316,11 @@ func (s *hostHTTPStream) Read() ([]byte, bool, error) {
 // Close aborts the upstream stream. Always safe to call (idempotent on host).
 func (s *hostHTTPStream) Close() {
 	if s == nil {
+		return
+	}
+	if s.directBody != nil {
+		_ = s.directBody.Close()
+		s.directBody = nil
 		return
 	}
 	if s.direct != nil {

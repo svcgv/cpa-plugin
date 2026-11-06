@@ -17,3 +17,7 @@ qoderwork/qoderwork
 # and login credentials) — never commit
 .local-cpa/
 qorder
+
+# Local PATs used for integration testing
+/pat.txt
+/qoderwork/pat.txt

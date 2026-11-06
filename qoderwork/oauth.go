@@ -76,8 +76,12 @@ func doRawJSON(client *http.Client, method, fullURL string, headers func(*http.R
 // exchangePATForJobToken calls POST /api/v1/jobToken/exchange with a PAT and
 // returns the resulting jt-/jrt- pair.
 func exchangePATForJobToken(pat string) (*jobTokenResponse, error) {
+	return exchangePATForJobTokenAt(upstreamBaseCN, pat)
+}
+
+func exchangePATForJobTokenAt(base, pat string) (*jobTokenResponse, error) {
 	body, _ := json.Marshal(map[string]string{"personal_token": pat})
-	data, _, err := doRawJSON(sharedHTTPClient(), http.MethodPost, endpointJobTokenExchange, nil, bytes.NewReader(body))
+	data, _, err := doRawJSON(sharedHTTPClient(), http.MethodPost, strings.TrimRight(base, "/")+"/api/v1/jobToken/exchange", nil, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -85,16 +89,20 @@ func exchangePATForJobToken(pat string) (*jobTokenResponse, error) {
 	if err := json.Unmarshal(data, &out); err != nil {
 		return nil, fmt.Errorf("jobToken exchange parse: %w", err)
 	}
-	if out.Token == "" || out.RefreshToken == "" {
-		return nil, fmt.Errorf("jobToken exchange: empty token pair in response")
+	if out.Token == "" {
+		return nil, fmt.Errorf("jobToken exchange: empty token in response")
 	}
 	return &out, nil
 }
 
 // refreshJobToken calls POST /api/v1/jobToken/refresh with a jrt-.
 func refreshJobToken(jrt string) (*jobTokenResponse, error) {
+	return refreshJobTokenAt(upstreamBaseCN, jrt)
+}
+
+func refreshJobTokenAt(base, jrt string) (*jobTokenResponse, error) {
 	body, _ := json.Marshal(map[string]string{"refresh_token": jrt})
-	data, _, err := doRawJSON(sharedHTTPClient(), http.MethodPost, endpointJobTokenRefresh, nil, bytes.NewReader(body))
+	data, _, err := doRawJSON(sharedHTTPClient(), http.MethodPost, strings.TrimRight(base, "/")+"/api/v1/jobToken/refresh", nil, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +134,7 @@ type userInfoResponse struct {
 // auth's identity fields (uid, nickname, user_type for COSY signing).
 // The endpoint returns plain JSON (no envelope) — same as jobToken/exchange.
 func fetchUserInfo(jt string) (*userInfoResponse, error) {
-	return fetchUserInfoAt(endpointUserInfo, jt)
+	return fetchUserInfoAt(upstreamBaseCN, jt)
 }
 
 // fetchUserInfoAt queries /api/v1/userinfo at an explicit base so the
@@ -160,6 +168,9 @@ func buildStoredAuthFromJobToken(pat string, tok *jobTokenResponse, ui *userInfo
 	expiresAt := time.Now().Add(24 * time.Hour).Unix()
 	if tok.ExpiresIn > 0 {
 		expiresAt = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Millisecond).Unix()
+	}
+	if parsed, err := time.Parse(time.RFC3339, tok.ExpiresAt); err == nil {
+		expiresAt = parsed.Unix()
 	}
 
 	nickname := ""
@@ -288,32 +299,10 @@ func makePKCE() (string, string) {
 // handleStartLogin implements AuthProvider.StartLogin: build the device
 // authorization URL and stash the PKCE verifier under the returned state.
 func handleStartLogin(raw []byte) ([]byte, error) {
-	verifier, challenge := makePKCE()
-	nonce := uuid.NewString()
-	machineID := defaultMachineID()
-
-	q := url.Values{}
-	q.Set("challenge", challenge)
-	q.Set("challenge_method", "S256")
-	q.Set("nonce", nonce)
-	q.Set("machine_id", machineID)
-	q.Set("client_id", qoderClientID)
-	q.Set("redirect_uri", qoderRedirectURI)
-	authURL := qoderWebsiteCN + "/device/selectAccounts?" + q.Encode()
-
 	now := time.Now()
 	state := fmt.Sprintf("qw-%d", now.UnixNano())
-	loginStates.Store(state, &loginCtx{verifier: verifier, nonce: nonce, machineID: machineID, expires: now.Add(loginTTL), startedAt: now.UnixNano()})
-	return okEnvelope(pluginapi.AuthLoginStartResponse{
-		Provider:  providerName,
-		URL:       authURL,
-		State:     state,
-		ExpiresAt: now.Add(loginTTL).UTC(),
-		Metadata: map[string]any{
-			"logo":   pluginLogoURL,
-			"prompt": "在打开的页面中登录并授权 QoderWork（设备授权，无需 PAT）。完成后此窗口会自动关闭。",
-		},
-	})
+	loginStates.Store(state, &loginCtx{expires: now.Add(loginTTL), startedAt: now.UnixNano()})
+	return okEnvelope(pluginapi.AuthLoginStartResponse{Provider: providerName, URL: qoderWebsiteCN + "/account/integrations", State: state, ExpiresAt: now.Add(loginTTL).UTC(), Metadata: map[string]any{"logo": pluginLogoURL, "prompt": "请创建 PAT 后在 QoderWork 管理面板选择区域并导入。"}})
 }
 
 // pollDeviceToken performs one GET against /api/v1/deviceToken/poll.
@@ -429,33 +418,20 @@ func handlePollLogin(raw []byte) ([]byte, error) {
 		if !strings.HasPrefix(pat, "pt-") {
 			return nil, fmt.Errorf("poll: PAT must start with pt-")
 		}
-		tok, err := exchangePATForJobToken(pat)
+		region := regionCN
+		if value, ok := req.Metadata["region"].(string); ok {
+			region = parseRegionValue(value)
+		}
+		tok, err := exchangePATForJobTokenAt(endpointsForRegion(region).OpenAPI, pat)
 		if err != nil {
 			return nil, fmt.Errorf("PAT exchange failed: %w", err)
 		}
-		ui, _ := fetchUserInfo(tok.Token)
+		ui, err := fetchUserInfoAt(endpointsForRegion(region).OpenAPI, tok.Token)
+		if err != nil || ui == nil || ui.ID == "" {
+			return nil, fmt.Errorf("PAT 身份验证失败")
+		}
 		sa := buildStoredAuthFromJobToken(pat, tok, ui)
-		loginStates.Delete(state)
-		return okEnvelope(pluginapi.AuthLoginPollResponse{
-			Status: pluginapi.AuthLoginStatusSuccess,
-			Auth:   toAuthData(sa),
-		})
-	}
-
-	// Device-authorization path: poll the grant. The verifier never left
-	// this process; the nonce pairs it to the auth URL we handed out.
-	tok, pending, err := pollDeviceToken(lc.nonce, lc.verifier)
-	if err != nil {
-		return nil, fmt.Errorf("device authorization poll: %w", err)
-	}
-	if !pending && tok != nil {
-		// Auth file must land IMMEDIATELY — no upstream calls before return.
-		// The host writes the auth file from AuthLoginPollResponse, so any
-		// blocking work (fetchUserInfo, hostAuthList) delays persistence.
-		// UserID is already in the poll response; nickname is fetched lazily
-		// by the panel on first load. PAT coalescing happens on keepalive.
-		sa := buildStoredAuthFromDeviceToken(tok, nil)
-		sa.Auth.MachineID = lc.machineID
+		sa.Auth.Region, sa.Auth.Domain = string(region), domainForRegion(region)
 		loginStates.Delete(state)
 		return okEnvelope(pluginapi.AuthLoginPollResponse{
 			Status: pluginapi.AuthLoginStatusSuccess,
@@ -482,7 +458,7 @@ func handlePollLogin(raw []byte) ([]byte, error) {
 
 	return okEnvelope(pluginapi.AuthLoginPollResponse{
 		Status:  pluginapi.AuthLoginStatusPending,
-		Message: "等待浏览器完成 QoderWork 设备授权",
+		Message: "请在管理面板导入 PAT",
 	})
 }
 
@@ -604,37 +580,35 @@ func handleRefreshAuth(raw []byte) ([]byte, error) {
 		return nil, fmt.Errorf("refresh: %w", err)
 	}
 
-	if strings.HasPrefix(sa.Auth.RefreshToken, "drt-") {
-		// OAuth device family — deviceToken/refresh ONLY, against the realm the
-		// credential was issued by.
-		tok, err := refreshDeviceTokenAt(sa.endpoints().OpenAPI, sa.Auth.RefreshToken)
-		if err != nil {
-			return nil, fmt.Errorf("refresh rejected: %w — deviceToken refresh failed; re-login via OAuth required", err)
-		}
-		sa.Auth.AccessToken = tok.accessToken()
-		sa.Auth.RefreshToken = tok.RefreshToken
-		sa.Auth.ExpiresAt = preserveExpiry(deviceExpiryUnix(tok), sa.Auth.ExpiresAt)
-		invalidateCosySession(sa.Account.UID)
-		return okEnvelope(pluginapi.AuthRefreshResponse{Auth: toAuthDataForRefresh(sa)})
+	if !strings.HasPrefix(sa.Auth.PersonalToken, "pt-") {
+		return nil, fmt.Errorf("需要补充该区域的 PAT；原账号记录已保留")
 	}
 
 	// Legacy PAT family: Tier 1 jrt- refresh → Tier 2 PAT re-exchange.
-	tok, err := refreshJobToken(sa.Auth.RefreshToken)
-	if err != nil && sa.Auth.PersonalToken != "" {
-		// Tier 2: jrt- expired — fall back to PAT re-exchange.
-		tok, err = exchangePATForJobToken(sa.Auth.PersonalToken)
+	var tok *jobTokenResponse
+	var refreshErr error
+	if strings.HasPrefix(sa.Auth.RefreshToken, "jrt-") {
+		tok, refreshErr = refreshJobTokenAt(sa.endpoints().OpenAPI, sa.Auth.RefreshToken)
+	} else {
+		refreshErr = fmt.Errorf("旧登录凭证需要转换")
 	}
-	if err != nil {
-		return nil, fmt.Errorf("refresh rejected: %w — both jrt- refresh and PAT re-exchange failed; re-import PAT required", err)
+	if refreshErr != nil {
+		// Tier 2: jrt- expired — fall back to PAT re-exchange.
+		tok, refreshErr = exchangePATForJobTokenAt(sa.endpoints().OpenAPI, sa.Auth.PersonalToken)
+	}
+	if refreshErr != nil {
+		return nil, fmt.Errorf("refresh rejected: %w — PAT 换取凭证失败", refreshErr)
 	}
 	sa.Auth.AccessToken = tok.Token
 	if tok.RefreshToken != "" {
 		sa.Auth.RefreshToken = tok.RefreshToken
 	}
-	sa.Auth.ExpiresAt = preserveExpiry(
-		time.Now().Add(time.Duration(tok.ExpiresIn)*time.Millisecond).Unix(),
-		sa.Auth.ExpiresAt,
-	)
+	if tok.ExpiresIn > 0 {
+		sa.Auth.ExpiresAt = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Millisecond).Unix()
+	}
+	if parsed, parseErr := time.Parse(time.RFC3339, tok.ExpiresAt); parseErr == nil {
+		sa.Auth.ExpiresAt = parsed.Unix()
+	}
 	invalidateCosySession(sa.Account.UID)
 	// Host persists the refreshed credential itself after Refresh returns
 	// (conductor.go refreshAuth → m.Update → persist). Writing from the

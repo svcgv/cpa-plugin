@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -315,38 +316,59 @@ func unionModels(a, b []pluginapi.ModelInfo) []pluginapi.ModelInfo {
 
 func fetchDynamicModelsFromStorage(storageJSON []byte) []pluginapi.ModelInfo {
 	sa, err := parseStored(storageJSON)
-	if err != nil || sa == nil {
-		return fetchDynamicModels()
+	if err != nil || sa == nil || !strings.HasPrefix(sa.Auth.PersonalToken, "pt-") {
+		return nil
 	}
 	owner := modelCacheIdentity(sa)
 	if models, ok := cachedDynamicModelsFor(owner); ok {
 		return models
 	}
-	if active, _ := modelsBackoffActive(); active {
-		if sa.region() == regionIntl {
-			if anyAuthRegion(regionCN) {
-				return unionModels(wbModels(), intlStaticModels())
-			}
-			return intlStaticModels()
-		}
-		return wbModels()
-	}
-	if dyn, err := callModelsForAuth(sa); err == nil && len(dyn) > 0 {
+	dyn, fetchErr := callModelsForAuth(sa)
+	if fetchErr == nil && len(dyn) > 0 {
 		storeDynamicModelsFor(owner, dyn)
 		recordModelsStatus("dynamic", len(dyn), nil, nil)
 		return dyn
 	}
-	return fetchDynamicModels()
+	// Only this credential's stale catalog is eligible as fallback.
+	dynamicModelsCache.RLock()
+	entry := dynamicModelsCache.entries[owner]
+	var stale []pluginapi.ModelInfo
+	if entry != nil {
+		stale = append(stale, entry.models...)
+	}
+	dynamicModelsCache.RUnlock()
+	if len(stale) > 0 {
+		recordModelsStatus("saved", len(stale), nil, fetchErr)
+		return stale
+	}
+	if saved := loadCatalog(sa); len(saved) > 0 {
+		recordModelsStatus("saved", len(saved), nil, fetchErr)
+		return saved
+	}
+	if sa.region() == regionIntl {
+		recordModelsStatus("static", len(intlStaticModels()), nil, fetchErr)
+		return intlStaticModels()
+	}
+	recordModelsStatus("static", len(wbModels()), nil, fetchErr)
+	return wbModels()
 }
 
 // callModelsForAuth dispatches catalog discovery by realm: CN uses the
 // COSY-signed gateway endpoint, international uses the OpenAI-style gateway
 // with a Bearer job token.
 func callModelsForAuth(sa *storedAuth) ([]pluginapi.ModelInfo, error) {
-	if sa.region() == regionIntl {
-		return callIntlModelsAPI(sa)
+	if err := preparePATCredential(sa); err != nil {
+		return nil, err
 	}
-	return callModelsAPIWithFallback(sa)
+	base := strings.TrimRight(sa.endpoints().Gateway, "/") + "/algo/api/v2/model/list"
+	models, err := callModelsAPIWithBase(sa, base)
+	if err != nil && strings.Contains(err.Error(), "status 401") {
+		if refreshErr := forcePATCredential(sa); refreshErr != nil {
+			return nil, refreshErr
+		}
+		return callModelsAPIWithBase(sa, base)
+	}
+	return models, err
 }
 
 // callModelsAPIWithFallback retries the catalog through a PAT-exchanged job
@@ -480,13 +502,27 @@ func doModelListRequest(ctx context.Context, sa *storedAuth, attempt modelListRe
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%s %s status %d: %s", attempt.Method, attempt.URL, resp.StatusCode, truncateRedacted(string(resp.Body), 180))
 	}
-	return parseModelListResponse(resp.Body)
+	models, err := parseModelListResponse(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	storeCatalogMetadata(sa, resp.Body)
+	saveCatalog(sa, resp.Body)
+	if useMaxContext(sa.region()) {
+		for i := range models {
+			if m, ok := metadataForModel(sa, models[i].ID); ok {
+				models[i].ContextLength = m.maxContextLength()
+			}
+		}
+	}
+	return models, nil
 }
 
 type modelCatalogEntry struct {
 	Key             string          `json:"key"`
 	ModelKey        string          `json:"model_key"`
 	DisplayName     string          `json:"display_name"`
+	Source          string          `json:"source"`
 	Format          string          `json:"format"`
 	Enable          json.RawMessage `json:"enable"`
 	MaxInputTokens  json.Number     `json:"max_input_tokens"`
@@ -494,7 +530,11 @@ type modelCatalogEntry struct {
 	IsDefault       json.RawMessage `json:"is_default"`
 	IsVL            json.RawMessage `json:"is_vl"`
 	IsReasoning     json.RawMessage `json:"is_reasoning"`
-	ContextConfig   map[string]struct {
+	ThinkingConfig  map[string]struct {
+		IsDefault bool                       `json:"is_default"`
+		Efforts   map[string]json.RawMessage `json:"efforts"`
+	} `json:"thinking_config"`
+	ContextConfig map[string]struct {
 		TokenCount json.Number     `json:"token_count"`
 		IsDefault  json.RawMessage `json:"is_default"`
 		Window     string          `json:"window"`
@@ -545,17 +585,23 @@ func (m modelCatalogEntry) key() string {
 
 func (m modelCatalogEntry) contextLength() int64 {
 	var listed int64
+	var defaultCount int
+	var defaultValue int64
 	for _, c := range m.ContextConfig {
 		n, err := c.TokenCount.Int64()
 		if err != nil || n <= 0 {
 			continue
 		}
 		if rawBool(c.IsDefault, false) {
-			return n
+			defaultCount++
+			defaultValue = n
 		}
 		if n > listed {
 			listed = n
 		}
+	}
+	if defaultCount == 1 {
+		return defaultValue
 	}
 	if n, err := m.DefaultContextWindow.Int64(); err == nil && n > 0 {
 		return n
@@ -578,7 +624,7 @@ func (m modelCatalogEntry) maxCompletion() int64 {
 	if n, err := m.MaxOutputTokens.Int64(); err == nil && n > 0 {
 		return n
 	}
-	return 8192
+	return 0
 }
 
 // modelCatalogScenes is the order in which catalog scenes are read. The Qoder
@@ -672,6 +718,16 @@ func parseModelListResponse(body []byte) ([]pluginapi.ModelInfo, error) {
 			if m.vision() {
 				modalities = append(modalities, "image")
 			}
+			var thinking *pluginapi.ThinkingSupport
+			if enabled, ok := m.ThinkingConfig["enabled"]; ok && len(enabled.Efforts) > 0 {
+				levels := make([]string, 0, len(enabled.Efforts))
+				for level := range enabled.Efforts {
+					levels = append(levels, level)
+				}
+				sort.Strings(levels)
+				_, zeroAllowed := m.ThinkingConfig["disabled"]
+				thinking = &pluginapi.ThinkingSupport{Levels: levels, ZeroAllowed: zeroAllowed}
+			}
 			out = append(out, pluginapi.ModelInfo{
 				ID:                         key,
 				Name:                       name,
@@ -680,6 +736,7 @@ func parseModelListResponse(body []byte) ([]pluginapi.ModelInfo, error) {
 				OwnedBy:                    providerName,
 				SupportedGenerationMethods: []string{"chat"},
 				SupportedInputModalities:   modalities,
+				Thinking:                   thinking,
 			})
 		}
 	}
@@ -701,6 +758,40 @@ func handleModelsStatus() map[string]any {
 	if models, ok := mostRecentDynamicModels(); ok {
 		out["cached"] = len(models)
 	}
+	var accounts []map[string]any
+	files, _ := hostAuthList()
+	for _, f := range files {
+		sa, err := hostAuthGet(f.AuthIndex)
+		if err != nil || sa == nil || !strings.HasPrefix(sa.Auth.PersonalToken, "pt-") {
+			continue
+		}
+		models, ok := cachedDynamicModelsFor(modelCacheIdentity(sa))
+		source := "dynamic"
+		if !ok {
+			models = loadCatalog(sa)
+			source = "saved"
+		}
+		if len(models) == 0 {
+			if sa.region() == regionIntl {
+				models = intlStaticModels()
+			} else {
+				models = wbModels()
+			}
+			source = "static"
+		}
+		rows := make([]map[string]any, 0, len(models))
+		for _, model := range models {
+			row := map[string]any{"id": publicModelID(model.Name, model.ID), "name": model.Name, "context": model.ContextLength}
+			if meta, ok := metadataForModel(sa, model.ID); ok {
+				row["default_context"] = meta.contextLength()
+				row["max_context"] = meta.maxContextLength()
+				row["source"] = meta.Source
+			}
+			rows = append(rows, row)
+		}
+		accounts = append(accounts, map[string]any{"auth_index": f.AuthIndex, "name": sa.Account.Nickname, "region": sa.region(), "source": source, "models": rows})
+	}
+	out["accounts"] = accounts
 	return out
 }
 
@@ -875,7 +966,21 @@ func handleModelStatic(raw []byte) ([]byte, error) {
 		return nil, err
 	}
 	cacheModelAliases(req.Host)
-	models := fetchDynamicModels()
+	var models []pluginapi.ModelInfo
+	files, _ := hostAuthListFiles()
+	for _, f := range files {
+		if f.Disabled {
+			continue
+		}
+		if !strings.HasPrefix(strings.ToLower(f.Name), providerName+"-") && !strings.EqualFold(f.Name, authFileName) {
+			continue
+		}
+		storage, err := hostAuthGetByIndex(f.AuthIndex)
+		if err != nil {
+			continue
+		}
+		models = unionModels(models, publicModelCatalog(fetchDynamicModelsFromStorage(storage)))
+	}
 	models = filterExcludedModels(models, req.Host)
 	return okEnvelope(pluginapi.ModelResponse{Provider: providerName, Models: models})
 }
@@ -890,7 +995,7 @@ func handleModelForAuth(raw []byte) ([]byte, error) {
 	// req.AuthProvider back would silently drop the model list whenever the
 	// auth file carries a non-canonical provider string.
 	cacheModelAliases(req.Host)
-	models := fetchDynamicModelsFromStorage(req.StorageJSON)
+	models := publicModelCatalog(fetchDynamicModelsFromStorage(req.StorageJSON))
 	models = filterExcludedModels(models, req.Host)
 	return okEnvelope(pluginapi.ModelResponse{Provider: providerName, Models: models})
 }

@@ -6,6 +6,7 @@ package main
 
 import (
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -43,6 +44,14 @@ type accountDetailCall struct {
 // failure the previous cached value is kept (stale-while-error) so a
 // transient upstream 500 does not blank the panel row.
 func cachedAccountDetails(authID string, sa *storedAuth, force bool) (plan string, ci *checkinSummary, cr *creditsSummary, errs []string) {
+	if sa == nil || !strings.HasPrefix(sa.Auth.PersonalToken, "pt-") {
+		return "", nil, nil, []string{"请补充该区域的 PAT"}
+	}
+	copy := *sa
+	sa = &copy
+	if err := preparePATCredential(sa); err != nil {
+		return "", nil, nil, []string{truncateRedacted(err.Error(), 180)}
+	}
 	var prev *accountCacheEntry
 	if v, ok := accountCache.Load(authID); ok {
 		prev = v.(*accountCacheEntry)

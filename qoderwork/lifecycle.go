@@ -238,7 +238,7 @@ func applyExhaustedPolicy(authIndex, authID string, sa *storedAuth, cr *creditsS
 
 // syncAuthNote writes note without changing disabled state.
 func syncAuthNote(authIndex, authID string, sa *storedAuth, cr *creditsSummary, disabled bool) error {
-	if sa == nil {
+	if sa == nil || !strings.HasPrefix(sa.Auth.PersonalToken, "pt-") {
 		return nil
 	}
 	note := displayNote(sa, cr, disabled)
@@ -286,6 +286,9 @@ func reconcileOneAccount(authIndex, authID string, force bool) (action lifecycle
 	sa, phys, err := hostAuthGetBundle(authIndex)
 	if err != nil {
 		return lifecycleNone, err
+	}
+	if !strings.HasPrefix(sa.Auth.PersonalToken, "pt-") {
+		return lifecycleNone, nil
 	}
 	disabled := false
 	if phys != nil {

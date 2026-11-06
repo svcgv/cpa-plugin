@@ -7,9 +7,11 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -60,8 +62,12 @@ func cpaToUpstreamKey(cpaModel string) string {
 //
 // while classic Chat Completions send "content": "hi". Both must parse.
 type openAIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role             string          `json:"role"`
+	Content          string          `json:"content"`
+	ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
+	ToolCallID       string          `json:"tool_call_id,omitempty"`
+	Name             string          `json:"name,omitempty"`
+	ReasoningContent string          `json:"reasoning_content,omitempty"`
 
 	// Images holds image URLs found in this message's content parts. The
 	// upstream agent body accepts them via image_urls /
@@ -76,14 +82,19 @@ type openAIMessage struct {
 // body only takes a prompt string.
 func (m *openAIMessage) UnmarshalJSON(raw []byte) error {
 	var probe struct {
-		Role    string          `json:"role"`
-		Content json.RawMessage `json:"content"`
+		Role             string          `json:"role"`
+		Content          json.RawMessage `json:"content"`
+		ToolCalls        json.RawMessage `json:"tool_calls"`
+		ToolCallID       string          `json:"tool_call_id"`
+		Name             string          `json:"name"`
+		ReasoningContent string          `json:"reasoning_content"`
 	}
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		return err
 	}
 	m.Role = probe.Role
 	m.Content, m.Images = contentParts(probe.Content)
+	m.ToolCalls, m.ToolCallID, m.Name, m.ReasoningContent = probe.ToolCalls, probe.ToolCallID, probe.Name, probe.ReasoningContent
 	return nil
 }
 
@@ -179,13 +190,21 @@ func imageURLFromPart(partType string, imageURL, fileData json.RawMessage) strin
 
 // openAIRequest is the CPA-facing chat completion request.
 type openAIRequest struct {
-	Model    string          `json:"model"`
-	Messages []openAIMessage `json:"messages"`
-	Stream   bool            `json:"stream"`
+	Model               string          `json:"model"`
+	Messages            []openAIMessage `json:"messages"`
+	Stream              bool            `json:"stream"`
+	Tools               json.RawMessage `json:"tools"`
+	ToolChoice          json.RawMessage `json:"tool_choice"`
+	MaxTokens           *int            `json:"max_tokens"`
+	MaxCompletionTokens *int            `json:"max_completion_tokens"`
+	MaxOutputTokens     *int            `json:"max_output_tokens"`
+	ReasoningEffort     string          `json:"reasoning_effort"`
+	ClientSessionID     string          `json:"-"`
 
 	// Input carries the Responses API form when the caller (or CPA) forwards
 	// it directly: "input" may be a string or an array of typed items.
-	Input json.RawMessage `json:"input"`
+	Input        json.RawMessage `json:"input"`
+	Instructions string          `json:"instructions"`
 
 	// Clients sometimes disclose their real working directory. Codex puts it
 	// in session metadata; some OpenAI-compatible clients send it at the top
@@ -227,10 +246,28 @@ func parseResponsesInput(raw json.RawMessage) []openAIMessage {
 	if json.Unmarshal(v, &items) != nil {
 		return nil
 	}
-	// Array of message objects ({role, content})?
+	// Responses API represents function calls and outputs as top-level items.
 	var msgs []openAIMessage
 	asMessages := true
 	for _, item := range items {
+		var typed struct {
+			Type      string          `json:"type"`
+			CallID    string          `json:"call_id"`
+			Name      string          `json:"name"`
+			Arguments string          `json:"arguments"`
+			Output    json.RawMessage `json:"output"`
+		}
+		_ = json.Unmarshal(item, &typed)
+		switch typed.Type {
+		case "function_call":
+			calls, _ := json.Marshal([]any{map[string]any{"id": typed.CallID, "type": "function", "function": map[string]any{"name": typed.Name, "arguments": typed.Arguments}}})
+			msgs = append(msgs, openAIMessage{Role: "assistant", ToolCalls: calls})
+			continue
+		case "function_call_output":
+			content, images := contentParts(typed.Output)
+			msgs = append(msgs, openAIMessage{Role: "tool", ToolCallID: typed.CallID, Content: content, Images: images})
+			continue
+		}
 		var m openAIMessage
 		if json.Unmarshal(item, &m) != nil || m.Role == "" {
 			asMessages = false
@@ -378,41 +415,95 @@ func buildQoderBody(req *openAIRequest, modelKey, userType string, sa *storedAut
 		return nil, fmt.Errorf("baseprompt decode: %w", err)
 	}
 
-	messages := req.effectiveMessages()
+	messages := append([]openAIMessage(nil), req.effectiveMessages()...)
+	if req.Instructions != "" {
+		messages = append([]openAIMessage{{Role: "system", Content: req.Instructions}}, messages...)
+	}
+	reasoningEffort, reasoningEnabled, err := resolveReasoning(sa, modelKey, req.ReasoningEffort)
+	if err != nil {
+		return nil, err
+	}
+	if sa != nil {
+		for i := range messages {
+			if len(messages[i].Images) == 0 {
+				continue
+			}
+			if meta, ok := metadataForModel(sa, modelKey); !ok || !meta.vision() {
+				return nil, fmt.Errorf("模型 %s 未声明支持图片输入", modelKey)
+			}
+			messages[i].Images = append([]string(nil), messages[i].Images...)
+			for j, image := range messages[i].Images {
+				messages[i].Images[j] = publishQoderImage(sa, image)
+			}
+		}
+	}
 	prompt := extractLatestUserPrompt(messages)
 	images := latestUserImages(messages)
-	if prompt == "" && len(images) == 0 {
+	if prompt == "" && len(images) == 0 && len(messages) == 0 {
 		return nil, fmt.Errorf("no user message in request")
 	}
 
 	nid := uuid.NewString()
+	requestSetID := uuid.NewString()
 	base["request_id"] = nid
 	base["chat_record_id"] = nid
-	base["request_set_id"] = uuid.NewString()
-	base["session_id"] = uuid.NewString()
+	base["request_set_id"] = requestSetID
+	base["session_id"] = referenceSessionID(sa, modelKey, req.ClientSessionID)
 	base["stream"] = true
-	base["aliyun_user_type"] = userType
+	base["aliyun_user_type"] = ""
+	base["system"] = ""
+	base["session_type"] = "qoderclicn"
+	if sa != nil && sa.region() == regionIntl {
+		base["session_type"] = "qodercli"
+	}
 	base["agent_id"] = "agent_common"
 
 	// model_config
-	if mc, ok := base["model_config"].(map[string]any); ok {
-		mc["key"] = modelKey
+	base["model_config"] = map[string]any{"key": modelKey, "is_reasoning": false, "source": "system"}
+	applyModelMetadata(base, sa, modelKey)
+	if mc, ok := base["model_config"].(map[string]any); ok && reasoningEnabled != nil {
+		mc["is_reasoning"] = *reasoningEnabled
+	}
+	maxTokens := req.MaxTokens
+	if req.MaxCompletionTokens != nil {
+		maxTokens = req.MaxCompletionTokens
+	}
+	if req.MaxOutputTokens != nil {
+		maxTokens = req.MaxOutputTokens
+	}
+	if meta, ok := metadataForModel(sa, modelKey); ok {
+		if declared := meta.maxCompletion(); declared > 0 && (maxTokens == nil || int64(*maxTokens) > declared) {
+			limit := int(declared)
+			maxTokens = &limit
+		}
+	}
+	parameters := map[string]any{}
+	if maxTokens != nil && *maxTokens > 0 {
+		parameters["max_tokens"] = *maxTokens
+		if mc, ok := base["model_config"].(map[string]any); ok {
+			mc["max_output_tokens"] = *maxTokens
+		}
+	}
+	if reasoningEffort != "" {
+		parameters["reasoning_effort"] = reasoningEffort
+	}
+	base["parameters"] = parameters
+	base["tools"] = []any{}
+	if len(req.Tools) > 0 {
+		var tools any
+		if json.Unmarshal(req.Tools, &tools) == nil {
+			base["tools"] = tools
+		}
+	}
+	if len(req.ToolChoice) > 0 {
+		var choice any
+		if json.Unmarshal(req.ToolChoice, &choice) == nil {
+			base["tool_choice"] = choice
+		}
 	}
 
-	// chat_context.text.text + chat_context.extra.originalContent.text
-	if cc, ok := base["chat_context"].(map[string]any); ok {
-		if txt, ok := cc["text"].(map[string]any); ok {
-			txt["text"] = prompt
-		}
-		if extra, ok := cc["extra"].(map[string]any); ok {
-			if oc, ok := extra["originalContent"].(map[string]any); ok {
-				oc["text"] = prompt
-			}
-			if mc, ok := extra["modelConfig"].(map[string]any); ok {
-				mc["key"] = modelKey
-			}
-		}
-	}
+	modelConfig := base["model_config"].(map[string]any)
+	base["chat_context"] = map[string]any{"chatPrompt": "", "imageUrls": nil, "extra": map[string]any{"context": []any{}, "modelConfig": map[string]any{"key": modelKey, "is_reasoning": modelConfig["is_reasoning"]}, "originalContent": prompt}, "features": []any{}, "text": prompt}
 
 	// Images travel inline in messages, as OpenAI-style content parts. That is
 	// exactly what the Qoder CLI runtime does (its message builder emits
@@ -421,49 +512,71 @@ func buildQoderBody(req *openAIRequest, modelKey, userType string, sa *storedAut
 	// stays null: filling it (with either a client URL or a re-uploaded one)
 	// never delivered the image to the model.
 
-	// messages: the Qoder template system prompt is kept (the gateway expects
-	// that shape) but its <env> block is rewritten for this host. When the
-	// client ships its own agent prompt (Codex), it is placed FIRST so its
-	// identity and instructions are not overridden by "You are Qoder".
 	var out []any
 	client := clientSystemText(messages)
 	if client != "" {
-		// Plan B: the client already ships a full agent prompt (Codex). Drop
-		// the Qoder template system prompt entirely so its identity, env and
-		// tool names cannot override the client's.
 		out = append(out, map[string]any{"role": "system", "content": client})
-	} else if msgs, ok := base["messages"].([]any); ok {
-		for _, m := range msgs {
-			mm, ok := m.(map[string]any)
-			if !ok {
-				continue
-			}
-			if role, _ := mm["role"].(string); role == "system" {
-				if txt, _ := mm["content"].(string); txt != "" {
-					mm["content"] = applyEnvironment(txt, req.clientWorkingDir())
-				}
-				out = append(out, mm)
-			}
-		}
 	}
 	for _, m := range messages {
 		if m.Role == "system" {
 			continue // already emitted first
 		}
-		out = append(out, map[string]any{"role": m.Role, "content": messageContent(m)})
+		role := m.Role
+		if role == "developer" {
+			role = "system"
+		}
+		item := map[string]any{"role": role, "content": messageContent(m)}
+		if len(m.ToolCalls) > 0 {
+			var calls any
+			if json.Unmarshal(m.ToolCalls, &calls) == nil {
+				item["tool_calls"] = calls
+			}
+		}
+		if m.ToolCallID != "" {
+			item["tool_call_id"] = m.ToolCallID
+		}
+		if m.Name != "" {
+			item["name"] = m.Name
+		}
+		if m.ReasoningContent != "" {
+			item["reasoning_content"] = m.ReasoningContent
+		}
+		out = append(out, item)
 	}
 	base["messages"] = out
 
 	// business
 	if biz, ok := base["business"].(map[string]any); ok {
-		biz["id"] = uuid.NewString()
+		biz["version"] = "1.0.0"
+		biz["id"] = requestSetID
 		biz["begin_at"] = time.Now().UnixMilli()
-		if len(prompt) > 30 {
-			biz["name"] = prompt[:30]
+		if runes := []rune(prompt); len(runes) > 30 {
+			biz["name"] = string(runes[:30])
 		} else {
 			biz["name"] = prompt
 		}
 	}
 
 	return json.Marshal(base)
+}
+
+func referenceSessionID(sa *storedAuth, modelKey, clientSession string) string {
+	uid := ""
+	if sa != nil {
+		uid = sa.Account.UID
+	}
+	sum := sha256.Sum256([]byte("qoder-session\x00" + uid + "\x00" + modelKey))
+	if strings.TrimSpace(clientSession) == "" {
+		clientSession = uuid.NewString()
+	}
+	return fmt.Sprintf("%x-%s", sum[:8], clientSession)
+}
+
+func requestClientSession(headers http.Header, hostMetadata, payloadMetadata map[string]any) string {
+	for _, value := range []string{headers.Get("X-Session-Id"), headers.Get("Session-Id"), headers.Get("Session_Id"), metaString(hostMetadata, "session_id"), metaString(payloadMetadata, "session_id")} {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }

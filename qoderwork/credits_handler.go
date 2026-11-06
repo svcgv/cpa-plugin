@@ -18,7 +18,8 @@ import (
 // qoder.com.cn by the user and pasted into the panel.
 func handleImportPAT(req pluginapi.ManagementRequest) map[string]any {
 	var body struct {
-		PAT string `json:"pat"`
+		PAT    string `json:"pat"`
+		Region string `json:"region"`
 	}
 	_ = json.Unmarshal(req.Body, &body)
 	pat := strings.TrimSpace(body.PAT)
@@ -28,20 +29,57 @@ func handleImportPAT(req pluginapi.ManagementRequest) map[string]any {
 	if !strings.HasPrefix(pat, "pt-") {
 		return map[string]any{"success": false, "error": "PAT must start with pt-"}
 	}
-	tok, err := exchangePATForJobToken(pat)
+	if regionName := strings.ToLower(strings.TrimSpace(body.Region)); regionName != "" && regionName != "cn" && regionName != "intl" {
+		return map[string]any{"success": false, "error": "region must be cn or intl"}
+	}
+	region := parseRegionValue(body.Region)
+	tok, err := exchangePATForJobTokenAt(endpointsForRegion(region).OpenAPI, pat)
 	if err != nil {
 		return map[string]any{"success": false, "error": "jobToken exchange: " + err.Error()}
 	}
-	ui, _ := fetchUserInfo(tok.Token) // best-effort
+	ui, err := fetchUserInfoAt(endpointsForRegion(region).OpenAPI, tok.Token)
+	if err != nil || ui == nil || strings.TrimSpace(ui.ID) == "" {
+		return map[string]any{"success": false, "error": "无法验证账号身份，请检查 PAT 和区域"}
+	}
 	sa := buildStoredAuthFromJobToken(pat, tok, ui)
+	sa.Auth.Region = string(region)
+	sa.Auth.Domain = domainForRegion(region)
 
-	fileJSON, err := buildAuthFileJSON(sa, false, displayNote(sa, nil, false), nil)
+	name := authFileNameFor(sa)
+	disabled := false
+	var existing map[string]any
+	if files, err := hostAuthList(); err == nil {
+		for _, f := range files {
+			previous, phys, err := hostAuthGetBundle(f.AuthIndex)
+			if err != nil || previous == nil || previous.region() != region || previous.Account.UID != sa.Account.UID {
+				continue
+			}
+			name = f.Name
+			if phys != nil {
+				if phys.Name != "" {
+					name = phys.Name
+				}
+				disabled = phys.Disabled
+				_ = json.Unmarshal(phys.JSON, &existing)
+			}
+			break
+		}
+	}
+	fileJSON, err := buildAuthFileJSON(sa, disabled, displayNote(sa, nil, disabled), nil)
 	if err != nil {
 		return map[string]any{"success": false, "error": err.Error()}
 	}
-	auth := toAuthData(sa)
+	if existing != nil {
+		var updated map[string]any
+		if json.Unmarshal(fileJSON, &updated) == nil {
+			for k, v := range updated {
+				existing[k] = v
+			}
+			fileJSON, _ = json.Marshal(existing)
+		}
+	}
 	saveReq := pluginapi.HostAuthSaveRequest{
-		Name: auth.FileName,
+		Name: name,
 		JSON: fileJSON,
 	}
 	saveBody, _ := json.Marshal(saveReq)
@@ -65,7 +103,7 @@ func handleImportPAT(req pluginapi.ManagementRequest) map[string]any {
 		"path":     saveResp.Path,
 		"uid":      sa.Account.UID,
 		"nickname": sa.Account.Nickname,
-		"file":     auth.FileName,
+		"file":     name,
 	}
 }
 

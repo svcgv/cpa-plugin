@@ -29,7 +29,11 @@ func streamEmit(streamID string, payload []byte) error {
 		return fmt.Errorf("no stream id")
 	}
 	body, _ := json.Marshal(map[string]any{"stream_id": streamID, "payload": payload})
-	_, err := hostCall(pluginabi.MethodHostStreamEmit, body)
+	raw, err := hostCall(pluginabi.MethodHostStreamEmit, body)
+	if err != nil {
+		return err
+	}
+	_, err = hostBridgeUnwrap(raw, pluginabi.MethodHostStreamEmit)
 	return err
 }
 
@@ -37,9 +41,10 @@ func streamEmitError(streamID, message string) {
 	if streamID == "" {
 		return
 	}
-	// A-37: never emit raw upstream bodies that may contain Bearer/JWT.
-	errJSON, _ := json.Marshal(map[string]any{"error": map[string]any{"message": redactSecrets(message)}})
-	_ = streamEmit(streamID, errJSON)
+	// The host expects the RPC error field, not a JSON error payload: otherwise
+	// cross-format translation can discard it as an empty stream.
+	body, _ := json.Marshal(map[string]any{"stream_id": streamID, "error": redactSecrets(message)})
+	_, _ = hostCall(pluginabi.MethodHostStreamEmit, body)
 }
 
 var streamCloseOnce sync.Map // streamID -> sync.Once
@@ -74,7 +79,7 @@ func streamHeaders() http.Header {
 // the outbound call and host transport policy applies. The host bridge emits
 // arbitrary 32KB chunks, so we adapt to io.Reader and keep the bufio.Scanner
 // SSE line framing unchanged.
-func pumpUpstreamStream(httpReq *http.Request, cancel context.CancelFunc, streamID string, sseFramed bool, requestedModel, upstreamModel, authUID string, started time.Time, authID string) {
+func pumpUpstreamStream(httpReq *http.Request, sa *storedAuth, encodedBody string, cancel context.CancelFunc, streamID string, sseFramed bool, requestedModel, upstreamModel, authUID string, started time.Time, authID string) {
 	// Always close the host stream exactly once on every exit path.
 	closed := false
 	closeOnce := func() {
@@ -89,7 +94,7 @@ func pumpUpstreamStream(httpReq *http.Request, cancel context.CancelFunc, stream
 		defer cancel()
 	}
 
-	stream, statusCode, _, err := hostHTTPDoStream(httpReq)
+	stream, statusCode, _, err := openChatWithQueue(httpReq, sa, encodedBody, upstreamModel, func() error { return streamEmit(streamID, nil) })
 	if err != nil {
 		publishUsage(requestedModel, upstreamModel, authUID, started, usage.Detail{}, true, 0, err.Error())
 		streamEmitError(streamID, fmt.Sprintf("http_error: %v", err))
@@ -107,6 +112,7 @@ func pumpUpstreamStream(httpReq *http.Request, cancel context.CancelFunc, stream
 		return
 	}
 	collector := &sseUsageCollector{}
+	normalizer := &qoderChunkNormalizer{}
 	emitted, unparsed := 0, 0
 	scanner := bufio.NewScanner(newHostStreamReader(stream))
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
@@ -117,7 +123,7 @@ func pumpUpstreamStream(httpReq *http.Request, cancel context.CancelFunc, stream
 		}
 		payload := strings.TrimPrefix(line, "data:")
 		payload = strings.TrimSpace(payload)
-		if payload == "[DONE]" {
+		if isQoderDone(payload) {
 			break
 		}
 		if err := qoderUpstreamStatusError(payload); err != nil {
@@ -130,9 +136,9 @@ func pumpUpstreamStream(httpReq *http.Request, cancel context.CancelFunc, stream
 			unparsed++
 			continue
 		}
-		emitted++
-		collector.feed(bodyStr)
-		cleaned := cleanChunkJSON(bodyStr)
+		normalized := normalizer.normalize(bodyStr)
+		collector.feed(normalized)
+		cleaned := cleanChunkJSON(normalized)
 		if cleaned == "" {
 			continue
 		}
@@ -144,6 +150,7 @@ func pumpUpstreamStream(httpReq *http.Request, cancel context.CancelFunc, stream
 			publishUsage(requestedModel, upstreamModel, authUID, started, collector.detail(), true, 0, "stream_emit: "+err.Error())
 			return
 		}
+		emitted++
 	}
 	// A mid-stream read failure means the client received a truncated stream:
 	// surface it as an error frame and record the attempt as failed.
@@ -151,6 +158,15 @@ func pumpUpstreamStream(httpReq *http.Request, cancel context.CancelFunc, stream
 		publishUsage(requestedModel, upstreamModel, authUID, started, collector.detail(), true, 0, err.Error())
 		streamEmitError(streamID, fmt.Sprintf("upstream stream read error: %v", err))
 		return
+	}
+	for _, chunk := range normalizer.flush(upstreamModel) {
+		if sseFramed {
+			chunk = "data: " + chunk
+		}
+		if err := streamEmit(streamID, []byte(chunk)); err != nil {
+			return
+		}
+		emitted++
 	}
 	if emitted == 0 {
 		// The upstream answered 200 but nothing was recognised. Closing the
@@ -250,15 +266,35 @@ func describeQoderRefusal(status int, body string) error {
 // (no async stream id): drain the upstream nested SSE, unwrap the inner
 // OpenAI chunks, return them as a slice. The collector, when non-nil,
 // observes the unwrapped inner chunks for usage extraction.
+// A 401 rejects the request before inference starts; retry once with a fresh
+// PAT exchange. Timeouts and ambiguous stream failures are never retried.
+func openSignedChatStream(req *http.Request, sa *storedAuth, encodedBody, model string) (*hostHTTPStream, int, http.Header, error) {
+	stream, status, headers, err := hostHTTPDoStream(req)
+	if err != nil || status != http.StatusUnauthorized {
+		return stream, status, headers, err
+	}
+	stream.Close()
+	if err := forcePATCredential(sa); err != nil {
+		return nil, status, headers, err
+	}
+	retry := req.Clone(req.Context())
+	retry.Body = io.NopCloser(strings.NewReader(encodedBody))
+	if err := applyCosyHeaders(retry, sa, encodedBody, retry.URL.String(), model, true); err != nil {
+		return nil, status, headers, err
+	}
+	return hostHTTPDoStream(retry)
+}
+
 func collectUpstreamStreamQoder(encodedBody string, sa *storedAuth, modelKey string, sseFramed bool, collector *sseUsageCollector) ([]pluginapi.ExecutorStreamChunk, int, error) {
-	httpReq, err := http.NewRequest(http.MethodPost, endpointChat, strings.NewReader(encodedBody))
+	chatURL := chatEndpointFor(sa)
+	httpReq, err := http.NewRequest(http.MethodPost, chatURL, strings.NewReader(encodedBody))
 	if err != nil {
 		return nil, 0, err
 	}
-	if err := applyCosyHeaders(httpReq, sa, encodedBody, endpointChat, modelKey, true); err != nil {
+	if err := applyCosyHeaders(httpReq, sa, encodedBody, chatURL, modelKey, true); err != nil {
 		return nil, 0, fmt.Errorf("cosy: %w", err)
 	}
-	stream, statusCode, _, err := hostHTTPDoStream(httpReq)
+	stream, statusCode, _, err := openChatWithQueue(httpReq, sa, encodedBody, modelKey, nil)
 	if err != nil {
 		return nil, 0, fmt.Errorf("http_error: %w", err)
 	}
@@ -268,6 +304,7 @@ func collectUpstreamStreamQoder(encodedBody string, sa *storedAuth, modelKey str
 		return nil, statusCode, fmt.Errorf("upstream %d: %s", statusCode, truncateRedacted(string(payload), 200))
 	}
 	chunks := make([]pluginapi.ExecutorStreamChunk, 0, 64)
+	normalizer := &qoderChunkNormalizer{}
 	var syncRawPreview strings.Builder
 	scanner := bufio.NewScanner(newHostStreamReader(stream))
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
@@ -281,8 +318,8 @@ func collectUpstreamStreamQoder(encodedBody string, sa *storedAuth, modelKey str
 			continue
 		}
 		payload := strings.TrimPrefix(line, "data:")
-		if strings.TrimSpace(payload) == "[DONE]" {
-			continue
+		if isQoderDone(payload) {
+			break
 		}
 		if err := qoderUpstreamStatusError(payload); err != nil {
 			return chunks, 0, err
@@ -291,10 +328,11 @@ func collectUpstreamStreamQoder(encodedBody string, sa *storedAuth, modelKey str
 		if bodyStr == "" {
 			continue
 		}
+		normalized := normalizer.normalize(bodyStr)
 		if collector != nil {
-			collector.feed(bodyStr)
+			collector.feed(normalized)
 		}
-		cleaned := cleanChunkJSON(bodyStr)
+		cleaned := cleanChunkJSON(normalized)
 		if cleaned == "" {
 			continue
 		}
@@ -305,6 +343,12 @@ func collectUpstreamStreamQoder(encodedBody string, sa *storedAuth, modelKey str
 	}
 	if err := scanner.Err(); err != nil {
 		return chunks, 0, fmt.Errorf("upstream stream read error: %w", err)
+	}
+	for _, chunk := range normalizer.flush(modelKey) {
+		if sseFramed {
+			chunk = "data: " + chunk
+		}
+		chunks = append(chunks, pluginapi.ExecutorStreamChunk{Payload: json.RawMessage(chunk)})
 	}
 	if len(chunks) == 0 {
 		logPlugin("warn", "qoderwork: sync stream produced no chunks; first data lines="+truncateRedacted(syncRawPreview.String(), 600))
@@ -404,6 +448,16 @@ func unwrapUpstreamChunk(payload string) string {
 		return payload
 	}
 	return ""
+}
+
+func isQoderDone(payload string) bool {
+	if strings.TrimSpace(payload) == "[DONE]" {
+		return true
+	}
+	var envelope struct {
+		Body string `json:"body"`
+	}
+	return json.Unmarshal([]byte(payload), &envelope) == nil && strings.TrimSpace(envelope.Body) == "[DONE]"
 }
 
 func cleanChunkJSON(s string) string {
@@ -598,6 +652,7 @@ func aggregateQoderSSE(r io.Reader, model string) ([]byte, error) {
 	// into memory because the gateway's SSE is short-lived (one chat call)
 	// and the inner stream is at most a few hundred KB.
 	var inner strings.Builder
+	normalizer := &qoderChunkNormalizer{}
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
@@ -624,11 +679,16 @@ func aggregateQoderSSE(r io.Reader, model string) ([]byte, error) {
 		// Re-emit the inner JSON as a standard "data:<json>\n" SSE frame so
 		// aggregateCompletion's parser can consume it unchanged.
 		inner.WriteString("data:")
-		inner.WriteString(bodyStr)
+		inner.WriteString(normalizer.normalize(bodyStr))
 		inner.WriteString("\n\n")
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("qoder SSE read: %w", err)
+	}
+	for _, chunk := range normalizer.flush(model) {
+		inner.WriteString("data:")
+		inner.WriteString(chunk)
+		inner.WriteString("\n\n")
 	}
 	return aggregateCompletion(strings.NewReader(inner.String()), model)
 }

@@ -180,7 +180,7 @@ button .spin{border-color:var(--on-acc);border-top-color:transparent}
 <body>
 <div class="wrap">
   <h1>QoderWork 账号面板</h1>
-  <div class="sub">套餐内 Credits 与资源包分开展示 · CN 每日 Credits 活动（北京时间 10:00 刷新）· 国际版不执行奖励 · 耗尽自动关</div>
+  <div class="sub">套餐内 Credits 与资源包分开展示 · 每日 Credits 活动（北京时间 10:00 刷新）</div>
   <div id="authBox" class="card" style="display:none;margin-bottom:16px">
     <div style="margin-bottom:8px;color:var(--mut)">需要管理密钥（management key）才能访问账号数据。从 CPA 主面板嵌入时会自动获取，无需输入。错误密钥请勿连点，避免 IP 封禁。</div>
     <div style="display:flex;gap:8px">
@@ -189,13 +189,12 @@ button .spin{border-color:var(--on-acc);border-top-color:transparent}
     </div>
   </div>
   <div class="bar">
-    <button id="addAccountBtn" onclick="openAddModal()">OAuth 登录</button>
-    <button class="sec" id="importBtn" onclick="openImportModal()">导入 PAT</button>
+    <button id="addAccountBtn" onclick="openImportModal()">PAT 登录</button>
     <button id="refreshBtn" onclick="load(true,this)">刷新数据</button>
     <button class="sec" onclick="runRewards('',this)">一键领取全部</button>
     <button class="sec" onclick="openRewardSettings()">奖励设置</button>
     
-    <label class="toggle" title="仅 CN：北京时间 10:05 / 11:05 / 15:05 / 19:05 / 23:05"><input type="checkbox" id="autoToggle" onchange="toggleRewardAuto(this.checked)"> 自动领取(CN)</label>
+    <label class="toggle" title="北京时间 10:05 / 11:05 / 15:05 / 19:05 / 23:05"><input type="checkbox" id="autoToggle" onchange="toggleRewardAuto(this.checked)"> 自动领取</label>
     <span class="toggle" id="rewardActionBar"></span>
     <span class="toggle" id="svtime"></span>
   </div>
@@ -207,28 +206,17 @@ button .spin{border-color:var(--on-acc);border-top-color:transparent}
     <button type="button" class="ftag" data-region="exhausted" onclick="filterRegion('exhausted',this)">耗尽 <span class="cnt" id="cntExhausted">0</span></button>
   </div>
   <details class="card" style="margin-bottom:16px"><summary>每日奖励领取记录</summary><div id="rewardResults" role="status" style="white-space:pre-wrap;overflow-wrap:anywhere">尚未执行</div></details>
+  <details class="card" style="margin-bottom:16px"><summary>模型与上下文</summary>
+    <label><input type="checkbox" id="cnMaxContext" onchange="saveContextSettings()"> 国内版使用最大上下文</label>
+    <label><input type="checkbox" id="intlMaxContext" onchange="saveContextSettings()"> 国际版使用最大上下文</label>
+    <label><input type="checkbox" id="queueWait" onchange="saveContextSettings()"> 模型繁忙时等待排队</label>
+    <label>最长等待（秒）<input type="number" id="queueWaitSeconds" min="1" value="540" onchange="saveContextSettings()" style="width:90px"></label>
+    <div id="queueProgress" role="status"></div>
+    <div id="modelSource" role="status"></div>
+    <div id="modelCatalog"></div>
+  </details>
   <div class="summary card" id="summaryBox" style="display:none"></div>
   <div id="grid" class="grid"><div class="loading">加载中…</div></div>
-</div>
-<div class="modal-mask" id="addModal" onclick="onAddMaskClick(event)">
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="addModalTitle">
-    <div class="modal-hd">
-      <h2 id="addModalTitle">QoderWork 设备授权登录</h2>
-      <button type="button" class="modal-x" onclick="closeAddModal()" aria-label="关闭">×</button>
-    </div>
-    <div class="modal-bd">
-      <p class="hint">选择区域后在对应站点完成授权，无需 PAT。令牌只写入 CPA 凭证库，不会显示在这里。</p>
-      <div class="add-region" style="display:flex;gap:8px;margin:0 0 10px">
-        <label style="display:flex;align-items:center;gap:6px"><input type="radio" name="addRegion" value="cn" checked> 国内版 qoder.com.cn</label>
-        <label style="display:flex;align-items:center;gap:6px"><input type="radio" name="addRegion" value="intl"> 国际版 qoder.com</label>
-      </div>
-      <div id="addBody" class="add-body"></div>
-    </div>
-    <div class="modal-ft">
-      <button type="button" class="sec" onclick="closeAddModal()">取消</button>
-      <button type="button" id="addStartBtn" onclick="startAddLogin(this)">开始登录</button>
-    </div>
-  </div>
 </div>
 <div class="modal-mask" id="importModal" onclick="onImportMaskClick(event)">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="importModalTitle">
@@ -237,7 +225,9 @@ button .spin{border-color:var(--on-acc);border-top-color:transparent}
       <button type="button" class="modal-x" onclick="closeImportModal()" aria-label="关闭">×</button>
     </div>
     <div class="modal-bd">
-      <p class="hint">到 <a href="https://qoder.com.cn/settings/personal-access-tokens" target="_blank" rel="noopener">qoder.com.cn → 设置 → Personal Access Tokens</a> 创建一个 PAT（pt- 开头），粘贴到下方。插件会自动换取 jobToken 并保存为 <code>qoderwork-&lt;uid&gt;.json</code>。</p>
+      <p class="hint">选择 PAT 所属区域，并在对应站点创建个人访问令牌：<a href="https://qoder.cn/account/integrations" target="_blank" rel="noopener">国内版</a> / <a href="https://qoder.com/account/integrations" target="_blank" rel="noopener">国际版</a>。</p>
+      <label><input type="radio" name="importRegion" value="cn" checked> 国内版</label>
+      <label><input type="radio" name="importRegion" value="intl"> 国际版</label>
       <input id="importPAT" type="password" placeholder="pt-xxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off" style="width:100%;padding:8px 10px;font-family:ui-monospace,monospace;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);"/>
       <p class="hint" style="margin-top:8px;opacity:0.7">PAT 长期有效（可在创建时设置过期时间）。插件存储 PAT 用于 jrt- 过期后自动续期，无需重新导入。</p>
     </div>
@@ -304,6 +294,8 @@ function saveKey(){
   sessionStorage.setItem(SS_KEY,v);
   document.getElementById("authBox").style.display="none";
   load(false);
+  loadRewardStatus();
+  loadContextSettings();
 }
 function showAuth(){document.getElementById("authBox").style.display="block";const i=document.getElementById("keyInput");i&&i.focus()}
 function authHeaders(k){return k?{"Authorization":"Bearer "+k}:{}}
@@ -376,25 +368,21 @@ function card(a){
   const disabled=!!a.disabled;
   const selected=!!a.selected;
   const regionBadge=isIntl?`<span class="badge global">INTL</span>`:`<span class="badge cn">CN</span>`;
-  // CN-only: 签到 + 领取Pro. International accounts have neither the credit
-  // package nor the check-in activity, so the buttons are omitted.
   let actionHTML;
-  if(isIntl){
-    actionHTML="";
-  }else{
+  {
     const checked=ci.today_checked_in;
     const ciActive=ci.active!==false; // absent=true (default active)
     const btnClass=checked?"done":(ciActive?"sec":"done");
     const btnText=checked?"已签到":(ciActive?"签到":"不可签");
     const btnDisabled=(checked||!ciActive)?" disabled=\"disabled\"":"";
     actionHTML=`<button class="${btnClass}" data-action="rewards" data-auth-index="${esc(a.auth_index)}"${btnDisabled}>${checked?"已领取":"每日奖励"}</button>`+
-      `<button class="sec" data-action="claim-pro" data-auth-index="${esc(a.auth_index)}" title="领取Pro升级包">领取Pro</button>`;
+      (isIntl?"":`<button class="sec" data-action="claim-pro" data-auth-index="${esc(a.auth_index)}" title="领取Pro升级包">领取Pro</button>`);
   }
   const selectBtn=selected
     ? `<button class="done" disabled="disabled">使用中</button>`
     : (disabled?``:`<button class="sec" data-action="select" data-auth-index="${esc(a.auth_index)}">选用</button>`);
   const refreshBtn=`<button class="sec" data-action="refresh" data-auth-index="${esc(a.auth_index)}" title="刷新积分">刷新</button>`;
-  const badges=(selected?`<span class="badge" style="background:var(--acc-ring);color:var(--acc);border-color:var(--acc)">使用中</span>`:"")+(disabled?`<span class="badge disabled">已禁用</span>`:"")+(exhausted?`<span class="badge exhausted">耗尽</span>`:"")+regionBadge+`<span class="badge ${esc(plan)}">${esc(a.plan||"-")}</span>`;
+  const badges=(a.needs_pat?`<span class="badge exhausted">请补充 PAT</span>`:"")+(selected?`<span class="badge" style="background:var(--acc-ring);color:var(--acc);border-color:var(--acc)">使用中</span>`:"")+(disabled?`<span class="badge disabled">已禁用</span>`:"")+(exhausted?`<span class="badge exhausted">耗尽</span>`:"")+regionBadge+`<span class="badge ${esc(plan)}">${esc(a.plan||"-")}</span>`;
   const display=(a.nickname||a.label||a.name||"").replace(/^qoderwork-?/i,"");
   const nick=display||("u"+(a.uid||"").slice(-8));
   const uidLine=isIntl
@@ -805,7 +793,7 @@ async function runRewards(idx,btn){
   try{
     const d=await api("/rewards/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({auth_index:idx})});
     if(d.error)throw new Error(d.error);
-    toast("每日奖励已排队","ok",d.started+" 个 CN 账号已开始；国际版已跳过（"+d.skipped+"）");
+    toast("每日奖励已排队","ok",d.started+" 个账号已开始，跳过 "+d.skipped+" 个");
     await loadRewardStatus();
   }catch(e){toast("领取失败","err",e.message)}finally{busy(btn,false)}
 }
@@ -818,6 +806,40 @@ async function saveRewardSettings(payload,waitFor){
     await new Promise(resolve=>setTimeout(resolve,100));
   }
   throw new Error("设置已写入，但运行时尚未生效");
+}
+async function loadContextSettings(){
+  try{
+    const d=await api('/models/context');
+    document.getElementById('cnMaxContext').checked=!!d.cn_max_context;
+    document.getElementById('intlMaxContext').checked=!!d.intl_max_context;
+    document.getElementById('queueWait').checked=!!d.queue_wait;
+    document.getElementById('queueWaitSeconds').value=String(d.queue_wait_seconds||540);
+    const waiting=d.queue_progress||[];
+    document.getElementById('queueProgress').textContent=waiting.map(q=>'排队中：'+q.model+' · 前方 '+q.queue_count+' · 预计 '+q.wait_seconds+' 秒').join('；');
+    if(waiting.length)setTimeout(loadContextSettings,5000);
+    const result=await api('/models/status'); const status=result.status||{};
+    document.getElementById('modelSource').textContent='模型目录：'+(status.source||'未知')+(status.fetched_at?' · '+status.fetched_at:'')+(status.last_error?' · '+status.last_error:'');
+    const catalogs=result.accounts||[];
+    document.getElementById('modelCatalog').innerHTML=catalogs.map(a=>'<p><strong>'+esc(a.name||a.auth_index)+' · '+esc(a.region)+' · '+esc(a.source)+'</strong><br>'+(a.models||[]).map(m=>esc(m.name)+' ('+esc(m.id)+')：'+esc(m.default_context||m.context)+' / 最大 '+esc(m.max_context||m.context)).join('<br>')+'</p>').join('');
+  }catch(e){document.getElementById('modelSource').textContent='模型状态获取失败：'+e.message}
+}
+async function saveContextSettings(){
+  const seconds=Number(document.getElementById('queueWaitSeconds').value);
+  if(!Number.isInteger(seconds)||seconds<1){toast('等待时间必须是大于零的整数','err');return}
+  const payload={cn_max_context:document.getElementById('cnMaxContext').checked,intl_max_context:document.getElementById('intlMaxContext').checked,queue_wait:document.getElementById('queueWait').checked,queue_wait_seconds:seconds};
+  try{
+    const r=await fetch('/v0/management/plugins/qoderwork/config',{method:'PATCH',credentials:'omit',headers:{'Content-Type':'application/json',...(authHeaders(getKey()))},body:JSON.stringify(payload)});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    let applied=false;
+    for(let i=0;i<20;i++){
+      const current=await api('/models/context');
+      if(current.cn_max_context===payload.cn_max_context&&current.intl_max_context===payload.intl_max_context&&current.queue_wait===payload.queue_wait&&current.queue_wait_seconds===payload.queue_wait_seconds){applied=true;break}
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
+    if(!applied)throw new Error('设置已写入，但运行时尚未生效');
+    await loadContextSettings();
+    toast('上下文设置已保存','ok','模型目录将重新加载');
+  }catch(e){toast('保存失败','err',e.message);loadContextSettings()}
 }
 async function toggleRewardAuto(on){
   try{
@@ -843,10 +865,10 @@ function openRewardSettings(){
       </div>
     </div>`;
   }).join("");
-  document.getElementById("rewardSettingsBody").innerHTML=`<p class="hint">仅 CN 账号执行。领取接口幂等，重复运行只查询；国际版永不执行。</p>
+  document.getElementById("rewardSettingsBody").innerHTML=`<p class="hint">国内版与国际版按账号分别查询并领取每日活动。</p>
     <label class="toggle"><input type="checkbox" id="rewardSettingsAuto" ${d.auto?"checked":""}> 自动领取</label>
     <label class="toggle" style="margin-top:8px"><input type="checkbox" id="rewardSettingsCheckin" ${d.actions&&d.actions.checkin?"checked":""}> 每日 Credits 活动</label>
-    <h3 style="font-size:14px;margin:16px 0 4px">CN 账号覆盖</h3>${accounts||'<p class="hint">暂无 CN 账号</p>'}`;
+    <h3 style="font-size:14px;margin:16px 0 4px">账号覆盖</h3>${accounts||'<p class="hint">暂无账号</p>'}`;
   document.querySelectorAll("[data-follow-global]").forEach(cb=>{
     cb.addEventListener("change",()=>{
       const box=document.querySelector(`[data-account-custom="${CSS.escape(cb.dataset.followGlobal)}"]`);
@@ -875,139 +897,6 @@ async function saveRewardSettingsDialog(btn){
     loadRewardStatus();
   }catch(e){toast("保存奖励设置失败","err",e.message)}finally{busy(btn,false)}
 }
-/* ---------------------------------------------------------------------------
-   OAuth login dialog (CN device authorization).
-   The panel only receives a session id and the authorization URL; the PKCE
-   verifier stays in the plugin process and tokens go straight to the auth store.
-   --------------------------------------------------------------------------- */
-let addSession=null;
-let addAttempt=0;
-let addPollTimer=null;
-
-function openAddModal(){
-  document.getElementById("addModal").classList.add("show");
-  resetAddState();
-}
-function closeAddModal(){
-  cancelAddSession();
-  document.getElementById("addModal").classList.remove("show");
-}
-function onAddMaskClick(e){
-  if(e.target===document.getElementById("addModal")) closeAddModal();
-}
-function resetAddState(){
-  addAttempt++;
-  stopAddPoll();
-  addSession=null;
-  const body=document.getElementById("addBody");
-  if(body)body.innerHTML="";
-}
-function cancelAddSession(){
-  const id=addSession&&addSession.id;
-  resetAddState();
-  if(id){
-    api("/login/cancel",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:id})}).catch(()=>{});
-  }
-}
-function setAddStatus(text,kind){
-  const body=document.getElementById("addBody");
-  if(!body)return;
-  body.innerHTML=`<div class="add-status ${kind||""}">${esc(text)}</div>`;
-}
-function stopAddPoll(){
-  if(addPollTimer){clearTimeout(addPollTimer);addPollTimer=null}
-}
-async function startAddLogin(btn){
-  busy(btn,true);
-  cancelAddSession();
-  const attempt=addAttempt;
-  try{
-    const regionEl=document.querySelector('input[name="addRegion"]:checked');
-    const region=regionEl?regionEl.value:"cn";
-    const d=await api("/login/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({region:region})});
-    if(attempt!==addAttempt) return;
-    if(!d.success){setAddStatus(d.error||"发起登录失败","err");return}
-    const url=qwSafeURL(d);
-    addSession={id:d.session_id,url:url};
-    renderAddURL(url);
-    try{window.open(url,"_blank","noopener")}catch(_){}
-    pollAddLogin(attempt);
-  }catch(e){
-    if(attempt===addAttempt) setAddStatus(e.message||"发起登录失败","err");
-  }finally{busy(btn,false)}
-}
-// hostUnescape repairs values CPA HTML-escaped on the way out: the host escapes
-// every string in a plugin management response, turning "&" into "&amp;".
-function hostUnescape(v){
-  return String(v==null?"":v)
-    .replace(/&amp;/g,"&").replace(/&#0*38;/g,"&")
-    .replace(/&lt;/g,"<").replace(/&gt;/g,">")
-    .replace(/&quot;/g,'"').replace(/&#0*39;/g,"'").replace(/&#x27;/gi,"'");
-}
-// qwSafeURL prefers the percent-encoded authorization URL, which the host cannot
-// corrupt.
-function qwSafeURL(d){
-  const enc=d&&d.url_encoded;
-  if(enc){
-    try{return decodeURIComponent(hostUnescape(enc))}catch(_){return hostUnescape(enc)}
-  }
-  return hostUnescape(d&&d.url);
-}
-function renderAddURL(url){
-  const body=document.getElementById("addBody");
-  if(!body)return;
-  body.innerHTML=
-    '<p class="add-step">在打开的页面登录并授权。若未自动打开，请复制下面的链接手动访问：</p>'+
-    '<div class="add-url"><input id="addUrl" readonly value="'+esc(url)+'">'+
-    '<button type="button" class="sec" onclick="copyAddURL(this)">复制</button>'+
-    '<button type="button" class="sec" onclick="openAddURL()">打开</button></div>'+
-    '<div class="add-status pending" id="addStatus">等待授权…</div>';
-}
-function copyAddURL(btn){
-  const input=document.getElementById("addUrl");
-  if(!input)return;
-  input.select();
-  try{navigator.clipboard&&navigator.clipboard.writeText(input.value)}catch(_){}
-  try{document.execCommand("copy")}catch(_){}
-  busy(btn,true,1200);
-}
-function openAddURL(){
-  if(addSession&&addSession.url){try{window.open(addSession.url,"_blank","noopener")}catch(_){}}
-}
-function pollAddLogin(attempt){
-  stopAddPoll();
-  if(attempt!==addAttempt||!addSession)return;
-  addPollTimer=setTimeout(async()=>{
-    if(attempt!==addAttempt||!addSession)return;
-    const sessionId=addSession.id;
-    let d;
-    try{
-      d=await api("/login/status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session_id:sessionId})});
-    }catch(e){
-      if(attempt===addAttempt)setAddStatus("状态查询失败，重试中…","pending");
-      pollAddLogin(attempt);
-      return;
-    }
-    if(attempt!==addAttempt||!addSession||addSession.id!==sessionId)return;
-    if(d.status==="pending"){
-      setAddStatus(d.message||"等待授权…","pending");
-      pollAddLogin(attempt);
-      return;
-    }
-    if(d.status==="success"){
-      addSession=null;
-      const who=d.nickname||d.uid||"";
-      setAddStatus("授权成功"+(who?"："+who:""),"ok");
-      toast("账号已添加","ok",who);
-      // Refresh the new card so its credits and check-in state load immediately;
-      // a partial failure stays visible on the card and can be retried there.
-      try{await load(true)}catch(_){}
-      return;
-    }
-    if(d.status==="cancelled"){setAddStatus("登录已取消","err");return}
-    setAddStatus(d.error||"登录失败","err");
-  },2000);
-}
 function openImportModal(){
   const m=document.getElementById("importModal");
   m.classList.add("show");
@@ -1026,7 +915,9 @@ async function importAuth(btn){
   if(!pat.startsWith("pt-")){toast("PAT 必须以 pt- 开头","warn");return}
   busy(btn,true);
   try{
-    const d=await api("/import",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pat})});
+    const regionEl=document.querySelector('input[name="importRegion"]:checked');
+    const region=regionEl?regionEl.value:"cn";
+    const d=await api("/import",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pat,region})});
     if(d.success){
       toast("导入成功","ok",(d.nickname||d.uid||"")+ " → "+(d.file||d.name||""));
       document.getElementById("importPAT").value="";
@@ -1038,7 +929,6 @@ async function importAuth(btn){
 }
 document.getElementById("keyInput").addEventListener("keydown",e=>{if(e.key==="Enter")saveKey()});
 document.addEventListener("keydown",e=>{
-  if(e.key=="Escape"&&document.getElementById("addModal").classList.contains("show")) closeAddModal();
   if(e.key=="Escape"&&document.getElementById("importModal").classList.contains("show")) closeImportModal();
   if(e.key=="Escape"&&document.getElementById("rewardSettingsModal").classList.contains("show")) closeRewardSettings();
 });
@@ -1047,6 +937,7 @@ if(window.__wbThemeSync)window.__wbThemeSync();
 if(getKey()){
   load(false);
   loadRewardStatus();
+  loadContextSettings();
 }else{
   showAuth();
 }

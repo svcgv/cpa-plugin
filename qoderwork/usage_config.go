@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -60,6 +61,8 @@ const fallbackUsageReportURL = "http://cpa-manager-plus:18317/v0/management/usag
 
 // configure decodes plugin config from the lifecycle request.
 func configure(raw []byte) {
+	nextCNMaxContext, nextIntlMaxContext := true, true
+	nextQueueWait, nextQueueSeconds := true, 540
 	nextCheckinAuto := true
 	nextLifecycleAuto := true
 	nextSchedulerMode := schedulerModeOff
@@ -90,7 +93,7 @@ func configure(raw []byte) {
 				// silently replaced with a default (which could re-enable
 				// automatic collection after a bad panel save).
 				switch key {
-				case "checkin_auto", "lifecycle_auto", "token_keepalive", "scheduler_mode", "usage_report_url", "usage_report_key", "management_key":
+				case "checkin_auto", "lifecycle_auto", "token_keepalive", "scheduler_mode", "usage_report_url", "usage_report_key", "management_key", "queue_wait", "queue_wait_seconds":
 					return
 				}
 				continue
@@ -107,6 +110,18 @@ func configure(raw []byte) {
 				if v == schedulerModeCredits {
 					nextSchedulerMode = schedulerModeCredits
 				}
+			case "cn_max_context":
+				nextCNMaxContext = qoderConfigEnabled(v)
+			case "intl_max_context":
+				nextIntlMaxContext = qoderConfigEnabled(v)
+			case "queue_wait":
+				nextQueueWait = qoderConfigEnabled(v)
+			case "queue_wait_seconds":
+				seconds, err := strconv.Atoi(v)
+				if err != nil || seconds < 1 || int64(seconds) > int64((time.Duration(1<<63-1))/time.Second) {
+					return
+				}
+				nextQueueSeconds = seconds
 			case "usage_report_url":
 				cfgURL = strings.TrimSpace(value.Value)
 			case "usage_report_key":
@@ -121,6 +136,8 @@ func configure(raw []byte) {
 		return
 	}
 	setRewardConfig(rewardCfg)
+	setContextWindows(nextCNMaxContext, nextIntlMaxContext)
+	setQueueSettings(nextQueueWait, nextQueueSeconds)
 
 	checkinAutoMu.Lock()
 	checkinAuto = nextCheckinAuto

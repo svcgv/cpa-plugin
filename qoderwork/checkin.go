@@ -166,16 +166,22 @@ func checkinOneAccount(f pluginapi.HostAuthFileEntry) map[string]any {
 		return out
 	}
 	out["nickname"] = sa.Account.Nickname
-	if !sa.isCN() {
+	if !strings.HasPrefix(sa.Auth.PersonalToken, "pt-") {
 		out["success"] = true
 		out["skipped"] = true
-		out["reason"] = "intl"
-		out["message"] = "国际版不参与签到与每日奖励"
+		out["reason"] = "needs_pat"
+		out["message"] = "账号需要补充 PAT"
 		return out
 	}
 	mu := checkinLockFor(f.AuthIndex)
 	mu.Lock()
 	defer mu.Unlock()
+	if sa.Auth.PersonalToken != "" {
+		if err := preparePATCredential(sa); err != nil {
+			out["error"] = err.Error()
+			return out
+		}
+	}
 	steps, credits, success, attention, _ := runQoderRewards(context.Background(), sa, rewardActionOrder, true)
 	out["success"] = success
 	out["needs_attention"] = attention

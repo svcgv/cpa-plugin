@@ -72,30 +72,28 @@ func isSessionDeadError(msg string) bool {
 // classification — doRawJSON collapses 4xx bodies into a generic error and
 // drops the business code, e.g. TOKEN_EXPIRE).
 func refreshCall(sa *storedAuth) (json.RawMessage, []byte, int, error) {
-	// Device family (drt-): use the device flow's own refresh endpoint.
-	// Routing is by token prefix, not PersonalToken presence — a PAT may
-	// coexist as fallback and must not hijack OAuth refreshes.
-	if strings.HasPrefix(sa.Auth.RefreshToken, "drt-") {
-		body, _ := json.Marshal(map[string]string{"refresh_token": sa.Auth.RefreshToken})
-		data, status, err := doRawJSON(sharedHTTPClient(), http.MethodPost, sa.endpoints().OpenAPI+"/api/v1/deviceToken/refresh", nil, bytes.NewReader(body))
-		if err == nil {
-			return data, data, status, nil
-		}
-		return nil, nil, status, err
+	if !strings.HasPrefix(sa.Auth.PersonalToken, "pt-") {
+		return nil, nil, 0, fmt.Errorf("需要补充该区域的 PAT")
 	}
 	// Legacy PAT family: try jrt- refresh first.
 	body, _ := json.Marshal(map[string]string{"refresh_token": sa.Auth.RefreshToken})
-	data, status, err := doRawJSON(sharedHTTPClient(), http.MethodPost, endpointJobTokenRefresh, nil, bytes.NewReader(body))
-	if err == nil {
-		return data, data, status, nil
+	var data []byte
+	var status int
+	var err error
+	if strings.HasPrefix(sa.Auth.RefreshToken, "jrt-") {
+		data, status, err = doRawJSON(sharedHTTPClient(), http.MethodPost, sa.endpoints().OpenAPI+"/api/v1/jobToken/refresh", nil, bytes.NewReader(body))
+		if err == nil {
+			return data, data, status, nil
+		}
 	}
 	// Fallback: PAT re-exchange (only when a PAT is actually present).
 	if sa.Auth.PersonalToken != "" {
 		patBody, _ := json.Marshal(map[string]string{"personal_token": sa.Auth.PersonalToken})
-		data2, status2, err2 := doRawJSON(sharedHTTPClient(), http.MethodPost, endpointJobTokenExchange, nil, bytes.NewReader(patBody))
+		data2, status2, err2 := doRawJSON(sharedHTTPClient(), http.MethodPost, sa.endpoints().OpenAPI+"/api/v1/jobToken/exchange", nil, bytes.NewReader(patBody))
 		if err2 == nil {
 			return data2, data2, status2, nil
 		}
+		return nil, nil, status2, err2
 	}
 	return nil, nil, status, err
 }
@@ -107,8 +105,8 @@ func refreshOneAuth(authIndex, authID string) (string, error) {
 	if err != nil {
 		return "error", fmt.Errorf("get auth: %w", err)
 	}
-	if strings.TrimSpace(sa.Auth.RefreshToken) == "" {
-		return "skipped", fmt.Errorf("no refreshToken")
+	if strings.TrimSpace(sa.Auth.PersonalToken) == "" {
+		return "skipped", fmt.Errorf("需要补充该区域的 PAT，原账号记录已保留")
 	}
 
 	data, raw, status, err := refreshCall(sa)
@@ -131,7 +129,13 @@ func refreshOneAuth(authIndex, authID string) (string, error) {
 	// RFC3339 expires_at instead of expires_in.
 	var tok jobTokenResponse
 	_ = json.Unmarshal(data, &tok)
-	expiry := time.Now().Add(time.Duration(tok.ExpiresIn) * time.Millisecond).Unix()
+	expiry := int64(0)
+	if tok.ExpiresIn > 0 {
+		expiry = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Millisecond).Unix()
+	}
+	if parsed, err := time.Parse(time.RFC3339, tok.ExpiresAt); err == nil {
+		expiry = parsed.Unix()
+	}
 	if tok.Token == "" {
 		var dt deviceTokenResponse
 		_ = json.Unmarshal(data, &dt)

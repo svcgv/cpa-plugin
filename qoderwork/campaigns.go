@@ -165,6 +165,10 @@ func (c rewardCampaign) displayKey() string {
 
 func campaignHeaders(req *http.Request, sa *storedAuth) {
 	billingHeaders(req, sa)
+	req.Header.Set("Cosy-Clienttype", "10")
+	if req.Method == http.MethodPost {
+		req.Header.Set("Origin", sa.endpoints().OpenAPI)
+	}
 	if sa != nil && sa.Auth.MachineID != "" {
 		req.Header.Set("Cosy-MachineId", sa.Auth.MachineID)
 	}
@@ -184,12 +188,12 @@ func campaignHeaders(req *http.Request, sa *storedAuth) {
 }
 
 func campaignRequest(ctx context.Context, sa *storedAuth, path, method string) (*hostHTTPResponse, error) {
-	if sa == nil || !sa.isCN() {
+	if sa == nil || (!sa.isCN() && sa.Auth.PersonalToken == "") {
 		return nil, errCheckinUnsupported
 	}
 	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, method, upstreamBaseCN+"/sash/api/v1/me/campaigns"+path, nil)
+	req, err := http.NewRequestWithContext(reqCtx, method, sa.endpoints().OpenAPI+"/sash/api/v1/me/campaigns"+path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -203,6 +207,15 @@ func fetchCampaigns(ctx context.Context, sa *storedAuth) ([]rewardCampaign, erro
 	resp, err := campaignRequest(ctx, sa, "", http.MethodGet)
 	if err != nil {
 		return nil, err
+	}
+	if resp.StatusCode == http.StatusUnauthorized && strings.HasPrefix(sa.Auth.PersonalToken, "pt-") {
+		if err := forcePATCredential(sa); err != nil {
+			return nil, err
+		}
+		resp, err = campaignRequest(ctx, sa, "", http.MethodGet)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
 		return nil, errCampaignsUnavailable
@@ -230,7 +243,7 @@ func campaignSummary(rows []rewardCampaign, now time.Time) *checkinSummary {
 	summary := &checkinSummary{ActivityName: "每日 Credits 活动（10:00 UTC+8 刷新）"}
 	var claimable, claimed int
 	for _, campaign := range rows {
-		if !campaign.active(now) {
+		if !campaign.active(now) || !campaignToday(campaign, now) {
 			continue
 		}
 		summary.Active = true
@@ -247,6 +260,15 @@ func campaignSummary(rows []rewardCampaign, now time.Time) *checkinSummary {
 	return summary
 }
 
+// For a bounded daily window, the date belongs to its start in UTC+8.
+// Longer campaigns and missing bounds use the server's current state.
+func campaignToday(c rewardCampaign, now time.Time) bool {
+	if c.StartAt <= 0 || (c.EndAt > 0 && (c.EndAt <= c.StartAt || c.EndAt-c.StartAt > 24*60*60)) {
+		return true
+	}
+	return time.Unix(c.StartAt, 0).In(campaignChinaZone).Format("2006-01-02") == now.In(campaignChinaZone).Format("2006-01-02")
+}
+
 // claimCampaigns performs one pass over currently claimable campaigns. No write
 // is retried. Claim success requires status=CLAIMED in the response.
 func claimCampaigns(ctx context.Context, sa *storedAuth, rows []rewardCampaign) (map[string]any, error) {
@@ -257,7 +279,7 @@ func claimCampaigns(ctx context.Context, sa *storedAuth, rows []rewardCampaign) 
 	already := false
 	seen := map[string]bool{}
 	for _, campaign := range rows {
-		if !campaign.active(time.Now()) {
+		if !campaign.active(time.Now()) || !campaignToday(campaign, time.Now()) {
 			continue
 		}
 		if campaign.ClaimStatus == "CLAIMED" {
@@ -281,6 +303,24 @@ func claimCampaigns(ctx context.Context, sa *storedAuth, rows []rewardCampaign) 
 		}
 		resp, err := campaignRequest(ctx, sa, "/"+url.PathEscape(campaign.ID)+"/claim", http.MethodPost)
 		if err != nil {
+			// A timeout may follow a successful write. Query once; never issue
+			// a second claim based on an ambiguous transport failure.
+			verifyCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			current, verifyErr := fetchCampaigns(verifyCtx, sa)
+			cancel()
+			confirmed := false
+			if verifyErr == nil {
+				for _, item := range current {
+					if item.ID == campaign.ID && item.ClaimStatus == "CLAIMED" {
+						confirmed = true
+						break
+					}
+				}
+			}
+			if confirmed {
+				already = true
+				continue
+			}
 			failures = append(failures, campaign.displayKey()+": "+truncateRedacted(err.Error(), 160))
 			continue
 		}
@@ -357,7 +397,7 @@ func fetchCheckinStatus(sa *storedAuth) (*checkinSummary, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	rows, err := fetchCampaigns(ctx, sa)
-	if errors.Is(err, errCampaignsUnavailable) {
+	if errors.Is(err, errCampaignsUnavailable) && sa.isCN() {
 		return fetchLegacyCheckinStatus(sa)
 	}
 	if err != nil {
@@ -368,13 +408,13 @@ func fetchCheckinStatus(sa *storedAuth) (*checkinSummary, error) {
 }
 
 func performCheckinCall(sa *storedAuth) (map[string]any, error) {
-	if sa == nil || !sa.isCN() {
+	if sa == nil || (!sa.isCN() && sa.Auth.PersonalToken == "") {
 		return nil, errCheckinUnsupported
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 	rows, err := fetchCampaigns(ctx, sa)
-	if errors.Is(err, errCampaignsUnavailable) {
+	if errors.Is(err, errCampaignsUnavailable) && sa.isCN() {
 		return performLegacyCheckinCall(sa)
 	}
 	if err != nil {

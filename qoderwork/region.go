@@ -44,7 +44,7 @@ type qoderEndpointSet struct {
 const (
 	qoderIntlWebsite = "https://qoder.com"
 	qoderIntlOpenAPI = "https://openapi.qoder.sh"
-	qoderIntlGateway = "https://api2-v2.qoder.sh"
+	qoderIntlGateway = "https://api3.qoder.sh"
 	// The international desktop client finishes the device grant on this
 	// deep link (cockpit-tools uses the same value).
 	qoderIntlRedirectURI = "qoder://aicoding.aicoding-agent/login-success"
@@ -115,6 +115,10 @@ func (sa *storedAuth) region() qoderRegion {
 // endpoints reports the endpoint set for a stored credential.
 func (sa *storedAuth) endpoints() qoderEndpointSet {
 	return endpointsForRegion(sa.region())
+}
+
+func chatEndpointFor(sa *storedAuth) string {
+	return strings.TrimRight(sa.endpoints().Gateway, "/") + "/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
 }
 
 // isCN reports whether the credential is a CN (qoder.com.cn) account. CN-only

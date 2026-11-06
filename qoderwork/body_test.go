@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 )
@@ -112,45 +111,24 @@ func TestClientSystemPromptReplacesQoderTemplate(t *testing.T) {
 	}
 }
 
-// Requests without a client system prompt keep the Qoder template (the
-// gateway expects that shape) but with a rewritten <env> block.
-func TestTemplateEnvIsRewrittenForThisHost(t *testing.T) {
-	req := &openAIRequest{Model: "qfmodel", Messages: []openAIMessage{{Role: "user", Content: "hi"}}}
+// The reference connector forwards the client's messages without injecting its own system prompt.
+func TestNoGeneratedSystemPrompt(t *testing.T) {
+	req := &openAIRequest{Model: "qfmodel", Messages: []openAIMessage{{Role: "user", Content: "hi"}}, Metadata: map[string]any{"cwd": "/private/client-path"}}
 	body, err := buildQoderBody(req, "qfmodel", "personal_professional_trial", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := string(body)
-	if strings.Contains(s, "D:/Projects/Qoder") || strings.Contains(s, "MINGW64") {
-		t.Fatal("stale template environment leaked")
+	var got struct {
+		Messages []map[string]any `json:"messages"`
 	}
-	if !strings.Contains(s, "Working directory: unknown") {
-		t.Fatal("env block must not claim a concrete directory")
-	}
-	// The plugin runs inside CPA, so a host path (e.g. /CLIProxyAPI) must never
-	// be presented to the model as the user's project.
-	if wd, err := os.Getwd(); err == nil && wd != "" && strings.Contains(s, "Working directory: "+wd) {
-		t.Fatalf("host cwd %q leaked into the prompt", wd)
-	}
-	if strings.Contains(s, "Today's date: <no value>") {
-		t.Fatal("date placeholder leaked")
-	}
-}
-
-// When the client discloses its real working directory, the template must use
-// it instead of the (irrelevant) CPA host directory.
-func TestTemplateEnvUsesClientWorkingDirectory(t *testing.T) {
-	req := &openAIRequest{
-		Model:    "qfmodel",
-		Messages: []openAIMessage{{Role: "user", Content: "hi"}},
-		Metadata: map[string]any{"cwd": "/Users/someone/my-project"},
-	}
-	body, err := buildQoderBody(req, "qfmodel", "personal_professional_trial", nil)
-	if err != nil {
+	if err = json.Unmarshal(body, &got); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), "Working directory: /Users/someone/my-project") {
-		t.Fatal("client cwd not used in env block")
+	if len(got.Messages) != 1 || got.Messages[0]["role"] != "user" || got.Messages[0]["content"] != "hi" {
+		t.Fatalf("unexpected generated prompt: %#v", got.Messages)
+	}
+	if strings.Contains(string(body), "/private/client-path") {
+		t.Fatal("client metadata should not be injected")
 	}
 }
 

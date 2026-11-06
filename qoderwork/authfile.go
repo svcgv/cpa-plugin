@@ -36,6 +36,12 @@ func sanitizeUIDForFileName(uid string) string {
 func authFileNameFor(sa *storedAuth) string {
 	if sa != nil {
 		if uid := sanitizeUIDForFileName(sa.Account.UID); uid != "" {
+			if sa.region() == regionIntl {
+				return "qoderwork-intl-" + uid + ".json"
+			}
+			if strings.HasPrefix(strings.ToLower(uid), "intl-") {
+				return "qoderwork-cn-" + uid + ".json"
+			}
 			return "qoderwork-" + uid + ".json"
 		}
 	}

@@ -100,7 +100,7 @@ func handleRewardsStatus() map[string]any {
 	configAccounts := rewardConfigJSON()["accounts"]
 	for _, f := range files {
 		sa, err := rewardHostAuthGet(f.AuthIndex)
-		if err != nil || !sa.isCN() {
+		if err != nil || (!sa.isCN() && sa.Auth.PersonalToken == "") {
 			continue
 		}
 		if result, ok := snapshot[f.AuthIndex]; ok {
@@ -142,12 +142,12 @@ func startRewardRun(authIndex string, actions []rewardAction, automatic bool) ma
 			rewardState.Unlock()
 			continue
 		}
-		if !sa.isCN() {
+		if !strings.HasPrefix(sa.Auth.PersonalToken, "pt-") {
 			skipped++
 			rewardState.Lock()
 			rewardState.results[f.AuthIndex] = rewardResult{
 				AuthIndex: f.AuthIndex, AuthID: f.ID, Name: f.Name, Nickname: sa.Account.Nickname,
-				Success: true, Steps: []rewardStep{{Action: "奖励领取", Status: "skipped", Message: "国际版账号不参与签到与每日奖励"}},
+				Success: true, Steps: []rewardStep{{Action: "奖励领取", Status: "skipped", Message: "账号需要补充 PAT"}},
 				FinishedAt: time.Now().Format(time.RFC3339),
 			}
 			rewardState.Unlock()
@@ -222,9 +222,17 @@ func executeRewardAccount(f pluginapi.HostAuthFileEntry, sa *storedAuth, actions
 			result.Steps = append(result.Steps, rewardStep{Action: "读取账号", Status: "error", Message: "账号凭据读取失败"})
 			return
 		}
-		if !fresh.isCN() {
-			result.Steps = append(result.Steps, rewardStep{Action: "奖励领取", Status: "skipped", Message: "国际版账号不参与签到与每日奖励"})
+		if !strings.HasPrefix(fresh.Auth.PersonalToken, "pt-") {
+			result.Steps = append(result.Steps, rewardStep{Action: "奖励领取", Status: "skipped", Message: "账号需要补充 PAT"})
 			return
+		}
+		if fresh.Auth.PersonalToken != "" {
+			if err := preparePATCredential(fresh); err != nil {
+				result.Success = false
+				result.NeedsAttention = true
+				result.Steps = append(result.Steps, rewardStep{Action: "签到", Status: "error", Message: truncateRedacted(err.Error(), 200)})
+				return
+			}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), rewardRunBudget)
 		defer cancel()
@@ -255,8 +263,8 @@ func executeRewardAccount(f pluginapi.HostAuthFileEntry, sa *storedAuth, actions
 // the management endpoints. A Global check occurs before campaign fetching.
 func runQoderRewards(ctx context.Context, sa *storedAuth, actions []rewardAction, manual bool) (steps []rewardStep, credits int64, success, attention, wrote bool) {
 	success = true
-	if sa == nil || !sa.isCN() {
-		return []rewardStep{{Action: "奖励领取", Status: "skipped", Message: "国际版账号不参与签到与每日奖励"}}, 0, true, false, false
+	if sa == nil || !strings.HasPrefix(sa.Auth.PersonalToken, "pt-") {
+		return []rewardStep{{Action: "奖励领取", Status: "skipped", Message: "账号需要补充 PAT"}}, 0, true, false, false
 	}
 	for _, action := range actions {
 		if action != rewardCheckin {

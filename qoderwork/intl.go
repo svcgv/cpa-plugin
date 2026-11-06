@@ -50,12 +50,11 @@ func intlStaticModels() []pluginapi.ModelInfo {
 		name string
 	}{
 		{"auto", "Auto"},
-		{"claude-sonnet-4.5", "Claude Sonnet 4.5"},
-		{"claude-opus-4.1", "Claude Opus 4.1"},
-		{"gpt-5", "GPT-5"},
-		{"gemini-2.5-pro", "Gemini 2.5 Pro"},
-		{"qwen3-max", "Qwen3 Max"},
-		{"kimi-k2", "Kimi K2"},
+		{"cmodel", "Cantus"},
+		{"ultimate", "Ultimate"},
+		{"performance", "Performance"},
+		{"efficient", "Efficient"},
+		{"lite", "Lite"},
 	}
 	out := make([]pluginapi.ModelInfo, 0, len(defs))
 	for _, d := range defs {

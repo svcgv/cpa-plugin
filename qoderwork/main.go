@@ -334,7 +334,7 @@ type registrationCapability struct {
 }
 
 // version is injected at build time via -ldflags "-X main.version=...".
-var version = "0.5.12"
+var version = "0.5.14"
 
 func wbRegistration() registration {
 	return registration{
@@ -346,6 +346,10 @@ func wbRegistration() registration {
 			GitHubRepository: "https://github.com/Sliverkiss/cpa-plugin",
 			Logo:             pluginLogoURL,
 			ConfigFields: []pluginapi.ConfigField{
+				{Name: "queue_wait", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Poll Qoder's queue and replay before the first output (default true)."},
+				{Name: "queue_wait_seconds", Type: pluginapi.ConfigFieldTypeInteger, Description: "Maximum Qoder queue waiting time per request in seconds (default 540)."},
+				{Name: "cn_max_context", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Use the largest declared CN model context (default true)."},
+				{Name: "intl_max_context", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Use the largest declared international model context (default true)."},
 				{Name: "checkin_auto", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Compatibility switch for CN daily campaign claims (default true). rewards.actions.checkin takes precedence when rewards is configured."},
 				{Name: "rewards", Type: pluginapi.ConfigFieldTypeObject, Description: "CN-only reward settings: auto (default true), actions (checkin, default true), and account overrides keyed by the account_key returned by /rewards/status."},
 				{Name: "lifecycle_auto", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Auto disable CN when credits exhausted; re-enable CN after check-in restores credits (default true)."},
@@ -576,7 +580,11 @@ func applyCosyHeaders(req *http.Request, sa *storedAuth, encodedBody, rawURL, mo
 	}
 	if modelKey != "" {
 		req.Header.Set("x-model-key", modelKey)
-		req.Header.Set("x-model-source", "system")
+		source := "system"
+		if m, ok := metadataForModel(sa, modelKey); ok && m.Source != "" {
+			source = m.Source
+		}
+		req.Header.Set("x-model-source", source)
 	}
 	return nil
 }
@@ -653,7 +661,7 @@ func toAuthDataOpts(sa *storedAuth, cr *creditsSummary, disabled bool) pluginapi
 	if sa != nil {
 		if uid := sanitizeUIDForFileName(sa.Account.UID); uid != "" {
 			id = uid
-			fileName = "qoderwork-" + uid + ".json"
+			fileName = authFileNameFor(sa)
 		}
 	}
 	label := labelForAuth(sa)
@@ -682,6 +690,9 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := preparePATCredential(sa); err != nil {
+		return nil, err
+	}
 	// Map CPA-facing model name (e.g. "qoder/qmodel_preview" or "qmodel_preview")
 	// to the upstream key the gateway recognises. The two realms use different
 	// model namespaces, so the mapping is region-specific.
@@ -690,10 +701,10 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 	if sa.Account.UID != "" {
 		authUID = sa.Account.UID
 	}
-	if sa.region() == regionIntl {
-		return executeIntl(req, sa, intlUpstreamModel(stripProviderPrefix(req.Model)), started, authUID)
+	upstreamModel, err := resolveRequestModel(sa, req.Model, req.AuthAttributes)
+	if err != nil {
+		return nil, err
 	}
-	upstreamModel := cpaToUpstreamKey(resolveUpstreamModel(stripProviderPrefix(req.Model), req.AuthAttributes))
 	// Build the QoderWork agent_chat_generation body from the OpenAI request,
 	// then QoderEncoding-encode it. The template embeds a 10657-token system
 	// prompt that the server requires for normal behaviour (KNOWLEDGE §5.2).
@@ -702,23 +713,25 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "payload parse: "+err.Error())
 		return nil, fmt.Errorf("payload parse: %w", err)
 	}
+	qwReq.ClientSessionID = requestClientSession(req.Headers, req.Metadata, qwReq.Metadata)
 	body, err := buildQoderBody(qwReq, upstreamModel, uiUserType(nil), sa)
 	if err != nil {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "body build: "+err.Error())
 		return nil, fmt.Errorf("body build: %w", err)
 	}
 	encodedBody := qoderEncode(body)
-	httpReq, err := http.NewRequest(http.MethodPost, endpointChat, strings.NewReader(encodedBody))
+	chatURL := chatEndpointFor(sa)
+	httpReq, err := http.NewRequest(http.MethodPost, chatURL, strings.NewReader(encodedBody))
 	if err != nil {
 		return nil, err
 	}
-	if err := applyCosyHeaders(httpReq, sa, encodedBody, endpointChat, upstreamModel, true); err != nil {
+	if err := applyCosyHeaders(httpReq, sa, encodedBody, chatURL, upstreamModel, true); err != nil {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "cosy: "+err.Error())
 		return nil, fmt.Errorf("cosy: %w", err)
 	}
 	// Compliance: route via host.http.do_stream so request-log captures the
 	// outbound call. Read entire body via the bridge, then fold SSE → completion.
-	stream, statusCode, _, err := hostHTTPDoStream(httpReq)
+	stream, statusCode, _, err := openChatWithQueue(httpReq, sa, encodedBody, upstreamModel, nil)
 	if err != nil {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, err.Error())
 		return nil, fmt.Errorf("http_error: %w", err)
@@ -767,17 +780,19 @@ func handleExecStream(raw []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := preparePATCredential(sa); err != nil {
+		return nil, err
+	}
 	started := time.Now()
 	authUID := ""
 	if sa.Account.UID != "" {
 		authUID = sa.Account.UID
 	}
 
-	// International realm: OpenAI-compatible passthrough (no COSY, no template).
-	if sa.region() == regionIntl {
-		return handleExecStreamIntl(req, sa, started, authUID)
+	upstreamModel, err := resolveRequestModel(sa, req.Model, req.AuthAttributes)
+	if err != nil {
+		return nil, err
 	}
-	upstreamModel := cpaToUpstreamKey(resolveUpstreamModel(stripProviderPrefix(req.Model), req.AuthAttributes))
 
 	// Build the QoderWork body (template-based) and QoderEncoding-encode.
 	bodyRaw := req.Payload
@@ -789,6 +804,7 @@ func handleExecStream(raw []byte) ([]byte, error) {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "payload parse: "+err.Error())
 		return nil, fmt.Errorf("payload parse: %w", err)
 	}
+	qwReq.ClientSessionID = requestClientSession(req.Headers, req.Metadata, qwReq.Metadata)
 	body, err := buildQoderBody(qwReq, upstreamModel, uiUserType(nil), sa)
 	if err != nil {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "body build: "+err.Error())
@@ -818,20 +834,21 @@ func handleExecStream(raw []byte) ([]byte, error) {
 	// client disconnects — otherwise the pump keeps reading a dead upstream until
 	// sharedHTTPClient's 120s timeout, holding a pool slot the whole time.
 	ctx, cancel := context.WithCancel(context.Background())
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointChat, strings.NewReader(encodedBody))
+	chatURL := chatEndpointFor(sa)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, chatURL, strings.NewReader(encodedBody))
 	if err != nil {
 		cancel()
 		streamEmitError(req.StreamID, err.Error())
 		streamClose(req.StreamID)
 		return okEnvelope(streamResponse{Headers: headers})
 	}
-	if err := applyCosyHeaders(httpReq, sa, encodedBody, endpointChat, upstreamModel, true); err != nil {
+	if err := applyCosyHeaders(httpReq, sa, encodedBody, chatURL, upstreamModel, true); err != nil {
 		cancel()
 		streamEmitError(req.StreamID, "cosy: "+err.Error())
 		streamClose(req.StreamID)
 		return okEnvelope(streamResponse{Headers: headers})
 	}
-	go pumpUpstreamStream(httpReq, cancel, req.StreamID, sseFramed, req.Model, upstreamModel, authUID, started, req.AuthID)
+	go pumpUpstreamStream(httpReq, sa, encodedBody, cancel, req.StreamID, sseFramed, req.Model, upstreamModel, authUID, started, req.AuthID)
 	return okEnvelope(streamResponse{Headers: headers})
 }
 

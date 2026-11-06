@@ -20,6 +20,7 @@ type wbAccount struct {
 	Nickname  string          `json:"nickname"`
 	UID       string          `json:"uid"`
 	Region    string          `json:"region"` // "cn" or "global"
+	NeedsPAT  bool            `json:"needs_pat"`
 	Plan      string          `json:"plan"`
 	Status    string          `json:"status"`
 	Disabled  bool            `json:"disabled"`
@@ -95,6 +96,7 @@ func buildDashboardEx(force, fetchCredits bool) map[string]any {
 			acct.Nickname = sa.Account.Nickname
 			acct.UID = sa.Account.UID
 			acct.Region = string(sa.region())
+			acct.NeedsPAT = !strings.HasPrefix(sa.Auth.PersonalToken, "pt-")
 			if fetchCredits {
 				plan, ci, cr, errs := cachedAccountDetails(f.ID, sa, force)
 				acct.Plan = plan
