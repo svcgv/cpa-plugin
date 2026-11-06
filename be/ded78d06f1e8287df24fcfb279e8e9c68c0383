@@ -1,0 +1,40 @@
+registry.json
+  s_86e831182f93cb::t_19f05358184261 9
+workbuddy/model_readiness.go
+  s_86e831182f93cb::t_1fa0130b969f55 764-766
+workbuddy/model_source_modelsdev.go
+  s_86e831182f93cb::t_1fa0130b969f55 208
+workbuddy/panel.test.js
+  s_86e831182f93cb::t_1fa0130b969f55 810,816-819
+workbuddy/panel.html
+  s_86e831182f93cb::t_19f05358184261 64,68,812,814
+  s_86e831182f93cb::t_1fa0130b969f55 427
+workbuddy/main.go
+  s_86e831182f93cb::t_19f05358184261 346
+workbuddy/panel_models.go
+  s_86e831182f93cb::t_19f05358184261 36,45-63
+  s_86e831182f93cb::t_8d091c20e27e05 64-65
+workbuddy/model_source_workbuddy.go
+  s_86e831182f93cb::t_19f05358184261 20,156-160,165-167,170-175,181-183
+workbuddy/panel_models_test.go
+  s_86e831182f93cb::t_8c7ee2b0e593ce 21,36
+  s_86e831182f93cb::t_1fa0130b969f55 93-117
+workbuddy/VERSION
+  s_86e831182f93cb::t_5e712aec667901 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "beded78d06f1e8287df24fcfb279e8e9c68c0383",
+  "prompts": {},
+  "sessions": {
+    "s_86e831182f93cb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1af75-640f-78e0-b1d1-a62ee7e585e2",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
