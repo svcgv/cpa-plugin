@@ -1,0 +1,27 @@
+registry.json
+  s_a7218e0cbabf4c::t_24bf6a7fe26584 27
+qoderwork/VERSION
+  s_a7218e0cbabf4c::t_24bf6a7fe26584 1
+qoderwork/main.go
+  s_a7218e0cbabf4c::t_24bf6a7fe26584 337
+qoderwork/panel.html
+  s_a7218e0cbabf4c::t_d42a1c3c2c1cbe 326
+qoderwork/panel.test.js
+  s_a7218e0cbabf4c::t_d42a1c3c2c1cbe 47-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "25705d539e4eb7ead6f699672374f00bf6b25f32",
+  "prompts": {},
+  "sessions": {
+    "s_a7218e0cbabf4c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1af73-80fd-78b2-86ba-7bad6f1706d6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
