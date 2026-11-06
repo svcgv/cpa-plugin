@@ -61,6 +61,7 @@ type modelReadinessSnapshot struct {
 	MetadataFetchedAt time.Time
 	ErrorCode         modelErrorCode
 	Models            []pluginapi.ModelInfo
+	CatalogFacts      []modelFacts
 	configGeneration  uint64
 	authGeneration    uint64
 	identitySHA256    string
@@ -231,6 +232,10 @@ func (r *modelRuntime) startIdentityCall(identitySHA256 string) (*modelIdentityS
 }
 
 func (r *modelRuntime) ensureForAuth(req authModelRequestWire) modelReadinessSnapshot {
+	return r.ensureForAuthRefresh(req, false)
+}
+
+func (r *modelRuntime) ensureForAuthRefresh(req authModelRequestWire, force bool) modelReadinessSnapshot {
 	slot := r.authSlot(req.AuthID)
 	sa, err := parseStored(req.StorageJSON)
 	if err == nil {
@@ -281,7 +286,8 @@ func (r *modelRuntime) ensureForAuth(req authModelRequestWire) modelReadinessSna
 		slot.nextAuth++
 	}
 	authGeneration := slot.nextAuth
-	if current := slot.current.Load(); current != nil && current.authGeneration == authGeneration && current.State != modelLoading {
+	current := slot.current.Load()
+	if !force && current != nil && current.authGeneration == authGeneration && current.State != modelLoading {
 		result := cloneModelReadinessSnapshot(*current)
 		slot.mu.Unlock()
 		r.configCommitMu.RUnlock()
@@ -304,7 +310,9 @@ func (r *modelRuntime) ensureForAuth(req authModelRequestWire) modelReadinessSna
 		authGeneration:   authGeneration,
 		identitySHA256:   identitySHA256,
 	}
-	storeModelReadinessSnapshot(slot, snapshot)
+	if !force || current == nil || current.authGeneration != authGeneration || !current.executable() {
+		storeModelReadinessSnapshot(slot, snapshot)
+	}
 	slot.mu.Unlock()
 	r.configCommitMu.RUnlock()
 
@@ -416,6 +424,7 @@ func (r *modelRuntime) ensureForAuth(req authModelRequestWire) modelReadinessSna
 		return r.finishAuthCall(slot, key, authGeneration, call, snapshot)
 	}
 
+	snapshot.CatalogFacts = append([]modelFacts(nil), modelSelection.cache.Models...)
 	models := make([]pluginapi.ModelInfo, len(modelSelection.cache.Models))
 	for i, model := range modelSelection.cache.Models {
 		models[i] = modelInfoFromSources(model, matchModelsDevRecord(model.ID, metadata.cache.Records))
@@ -491,6 +500,18 @@ func (r *modelRuntime) finishAuthCall(slot *modelAuthSlot, key modelGenerationKe
 	slot.mu.Lock()
 	var result modelReadinessSnapshot
 	if r.authGenerationCurrentLocked(slot, key, authGeneration) {
+		// A forced refresh keeps an executable snapshot visible while it runs.
+		// If refreshing fails even before the disk fallback can be loaded, keep
+		// that same-generation snapshot and report it as stale.
+		if previous := slot.current.Load(); !snapshot.executable() && previous != nil && previous.authGeneration == authGeneration && previous.executable() {
+			preserved := cloneModelReadinessSnapshot(*previous)
+			preserved.State = modelStale
+			preserved.ErrorCode = snapshot.ErrorCode
+			if preserved.ModelSource == modelSourceFresh {
+				preserved.ModelSource = modelSourceCache
+			}
+			snapshot = preserved
+		}
 		result = storeModelReadinessSnapshot(slot, snapshot)
 	} else if current := slot.current.Load(); current != nil && current.configGeneration == configGeneration {
 		result = cloneModelReadinessSnapshot(*current)
@@ -739,6 +760,7 @@ func cloneModelInfos(models []pluginapi.ModelInfo) []pluginapi.ModelInfo {
 
 func cloneModelReadinessSnapshot(snapshot modelReadinessSnapshot) modelReadinessSnapshot {
 	snapshot.Models = cloneModelInfos(snapshot.Models)
+	snapshot.CatalogFacts = append([]modelFacts(nil), snapshot.CatalogFacts...)
 	return snapshot
 }
 

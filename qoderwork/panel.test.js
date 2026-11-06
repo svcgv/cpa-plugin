@@ -55,6 +55,19 @@ test('model status renders numeric context lengths and escapes model names', asy
   };
   await context.loadContextSettings();
   assert.equal(elements.get('modelSource').textContent, '模型目录：dynamic');
-  assert.match(elements.get('modelCatalog').innerHTML, /&lt;model&gt; \(model-id\)：128000 \/ 最大 256000/);
+  assert.match(elements.get('modelCatalog').innerHTML, /&lt;model&gt;<\/td><td class="model-id">model-id<\/td><td>128000<\/td><td>256000/);
   assert.equal(context.esc(0), '0');
+});
+
+test('model prices show upstream promotion and escape text', () => {
+  const { context, elements } = loadPanel('cn');
+  context.renderModelCatalog([{name:'account',region:'cn',source:'saved',fetched_at:'2026-01-01',models:[
+    {id:'one',name:'<model>',context:100,price_factor:0.05,original_price_factor:0.5,promotion:{active:false,description:'<discount>',window_start:'22:00',window_end:'08:00',timezone:'Asia/Shanghai'}},
+    {id:'two',name:'unknown',context:100},
+  ]}]);
+  const html=elements.get('modelCatalog').innerHTML;
+  assert.match(html,/<table class="model-table qoder-model-table">/);
+  assert.match(html,/<th scope="col">原始倍率<\/th>/);
+  assert.match(html,/0.05×/); assert.match(html,/<td>0.5×<\/td>/); assert.match(html,/当前未生效/);
+  assert.match(html,/22:00–08:00 Asia\/Shanghai/); assert.match(html,/&lt;discount&gt;/); assert.match(html,/未提供/);
 });

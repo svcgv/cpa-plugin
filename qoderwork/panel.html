@@ -53,6 +53,21 @@ button.sec{background:var(--btn-sec);color:var(--fg)}button.sec:hover{background
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;margin-bottom:80px}
 .card,.summary{background:var(--card);border:1px solid var(--border);border-radius:12px}
 .card{padding:16px}
+
+.model-account{margin-top:16px}
+.model-account-heading{font-weight:600;margin-bottom:4px;overflow-wrap:anywhere}
+.model-account-meta{color:var(--mut);font-size:12px;margin-bottom:8px;overflow-wrap:anywhere}
+.model-table-wrap{max-width:100%;overflow-x:auto;border:1px solid var(--border);border-radius:8px}
+.model-table{width:100%;min-width:520px;table-layout:fixed;border-collapse:collapse;text-align:left;font-size:13px}
+.model-table th,.model-table td{padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:top;overflow-wrap:anywhere}
+.model-table th{background:var(--surface);color:var(--mut);font-size:12px;font-weight:600;white-space:nowrap}
+.model-table tr:last-child td{border-bottom:0}
+.model-table.qoder-model-table{min-width:900px}
+.qoder-model-table th:nth-child(1){width:14%}.qoder-model-table th:nth-child(2){width:16%}.qoder-model-table th:nth-child(3),.qoder-model-table th:nth-child(4){width:11%}.qoder-model-table th:nth-child(5),.qoder-model-table th:nth-child(6){width:10%}.qoder-model-table th:nth-child(7){width:28%}
+.model-table .model-id{color:var(--mut);font-family:ui-monospace,monospace;font-size:12px}
+.model-table .model-rate{white-space:nowrap;font-weight:600}
+.model-table-empty{color:var(--mut);padding:12px}
+
 .card.selected{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc-ring)}
 .card h2{font-size:15px;margin:0 0 2px;display:flex;justify-content:space-between;align-items:center}
 .uid{color:var(--mut);font-size:11px;font-family:ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:12px}
@@ -206,14 +221,15 @@ button .spin{border-color:var(--on-acc);border-top-color:transparent}
     <button type="button" class="ftag" data-region="exhausted" onclick="filterRegion('exhausted',this)">耗尽 <span class="cnt" id="cntExhausted">0</span></button>
   </div>
   <details class="card" style="margin-bottom:16px"><summary>每日奖励领取记录</summary><div id="rewardResults" role="status" style="white-space:pre-wrap;overflow-wrap:anywhere">尚未执行</div></details>
-  <details class="card" style="margin-bottom:16px"><summary>模型与上下文</summary>
+  <details id="modelRates" class="card" style="margin-bottom:16px" ontoggle="if(this.open) openModelRates()"><summary>模型与积分倍率</summary>
+    <button type="button" class="sec" onclick="refreshModelRates(this)">刷新模型</button>
     <label><input type="checkbox" id="cnMaxContext" onchange="saveContextSettings()"> 国内版使用最大上下文</label>
     <label><input type="checkbox" id="intlMaxContext" onchange="saveContextSettings()"> 国际版使用最大上下文</label>
     <label><input type="checkbox" id="queueWait" onchange="saveContextSettings()"> 模型繁忙时等待排队</label>
     <label>最长等待（秒）<input type="number" id="queueWaitSeconds" min="1" value="540" onchange="saveContextSettings()" style="width:90px"></label>
     <div id="queueProgress" role="status"></div>
     <div id="modelSource" role="status"></div>
-    <div id="modelCatalog"></div>
+    <div id="modelCatalog" style="overflow-wrap:anywhere"></div>
   </details>
   <div class="summary card" id="summaryBox" style="display:none"></div>
   <div id="grid" class="grid"><div class="loading">加载中…</div></div>
@@ -807,6 +823,37 @@ async function saveRewardSettings(payload,waitFor){
   }
   throw new Error("设置已写入，但运行时尚未生效");
 }
+let modelRatesOpened=false;
+function formatModelFactor(n){return typeof n==='number'&&Number.isFinite(n)&&n>0?String(n)+'×':'未提供'}
+function modelPromotion(m){
+ const p=m.promotion; if(!p)return '';
+ let parts=[];
+ if(p.active===true)parts.push('优惠生效中'); else if(p.active===false)parts.push('当前未生效');
+ if(p.description)parts.push(p.description);
+ if(p.window_start&&p.window_end)parts.push(p.window_start+'–'+p.window_end+(p.timezone?' '+p.timezone:''));
+ return parts.join(' · ');
+}
+function renderModelCatalog(catalogs){
+ document.getElementById('modelCatalog').innerHTML=catalogs.map(a=>{
+  const label=(a.name||a.auth_index||'账号')+' · '+(a.region||'未知');
+  const rows=(a.models||[]).map(m=>'<tr><td>'+esc(m.name||m.id)+'</td><td class="model-id">'+esc(m.id)+'</td><td>'+esc(m.default_context??m.context??'未提供')+'</td><td>'+esc(m.max_context??m.context??'未提供')+'</td><td class="model-rate">'+esc(formatModelFactor(m.price_factor))+'</td><td>'+esc(m.original_price_factor?formatModelFactor(m.original_price_factor):'—')+'</td><td>'+esc(modelPromotion(m)||'—')+'</td></tr>').join('');
+  return '<section class="model-account"><div class="model-account-heading">'+esc(label)+'</div><div class="model-account-meta">来源：'+esc(a.source||'未知')+(a.fetched_at?' · '+esc(a.fetched_at):'')+(a.error?' · '+esc(a.error):'')+'</div>'+
+   (rows?'<div class="model-table-wrap" role="region" tabindex="0" aria-label="'+esc(label)+' 模型与积分倍率"><table class="model-table qoder-model-table"><thead><tr><th scope="col">模型</th><th scope="col">模型 ID</th><th scope="col">默认上下文</th><th scope="col">最大上下文</th><th scope="col">积分倍率</th><th scope="col">原始倍率</th><th scope="col">优惠</th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<div class="model-table-empty">模型目录尚未就绪</div>')+'</section>';
+ }).join('')||'暂无账号';
+}
+async function openModelRates(){
+ try{
+  const result=await api('/models/status'); if(result.error)throw new Error(result.error); renderModelCatalog(result.accounts||[]);
+  if(!modelRatesOpened&&(result.accounts||[]).some(a=>a.source==='static')){modelRatesOpened=true;await refreshModelRates();}
+  modelRatesOpened=true;
+ }catch(e){document.getElementById('modelSource').textContent='模型状态获取失败：'+e.message}
+}
+async function refreshModelRates(btn){
+ if(btn)busy(btn,true);
+ try{const result=await api('/models/refresh',{method:'POST'});if(result.error)throw new Error(result.error);renderModelCatalog(result.accounts||[]);}
+ catch(e){document.getElementById('modelSource').textContent='模型刷新失败：'+e.message}
+ finally{if(btn)busy(btn,false)}
+}
 async function loadContextSettings(){
   try{
     const d=await api('/models/context');
@@ -817,10 +864,10 @@ async function loadContextSettings(){
     const waiting=d.queue_progress||[];
     document.getElementById('queueProgress').textContent=waiting.map(q=>'排队中：'+q.model+' · 前方 '+q.queue_count+' · 预计 '+q.wait_seconds+' 秒').join('；');
     if(waiting.length)setTimeout(loadContextSettings,5000);
-    const result=await api('/models/status'); const status=result.status||{};
+    const result=await api('/models/status'); if(result.error)throw new Error(result.error); const status=result.status||{};
     document.getElementById('modelSource').textContent='模型目录：'+(status.source||'未知')+(status.fetched_at?' · '+status.fetched_at:'')+(status.last_error?' · '+status.last_error:'');
     const catalogs=result.accounts||[];
-    document.getElementById('modelCatalog').innerHTML=catalogs.map(a=>'<p><strong>'+esc(a.name||a.auth_index)+' · '+esc(a.region)+' · '+esc(a.source)+'</strong><br>'+(a.models||[]).map(m=>esc(m.name)+' ('+esc(m.id)+')：'+esc(m.default_context||m.context)+' / 最大 '+esc(m.max_context||m.context)).join('<br>')+'</p>').join('');
+    renderModelCatalog(catalogs);
   }catch(e){document.getElementById('modelSource').textContent='模型状态获取失败：'+e.message}
 }
 async function saveContextSettings(){

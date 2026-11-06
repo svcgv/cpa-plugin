@@ -803,3 +803,16 @@ test("a per-action reward button sends exactly that action", async () => {
   const run = calls.find(call => call.url.includes("/rewards/run"));
   assert.deepEqual(JSON.parse(run.body).actions, ["makeup"]);
 });
+
+test("model rates render account-specific values and escape upstream text", () => {
+  const { context, elements } = loadPanel();
+  context.renderModelRates({ accounts: [{ name: '<account>', region: 'cn', source: 'cache', models: [
+    { id: 'a', name: '<model>', credits: 'x0.05' }, { id: 'b', credits: '' },
+    { id: 'c', credits: '<b>promo</b>' },
+  ] }] });
+  const html = elements.get('modelRatesContent').innerHTML;
+  assert.match(html, /&lt;account&gt;/); assert.match(html, /<table class="model-table">/);
+  assert.match(html, /<th scope="col">模型 ID<\/th>/);
+  assert.match(html, /&lt;model&gt;<\/td><td class="model-id">a<\/td><td class="model-rate">0.05×/);
+  assert.match(html, /未提供/); assert.match(html, /&lt;b&gt;promo&lt;\/b&gt;/);
+});

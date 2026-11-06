@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -519,18 +520,21 @@ func doModelListRequest(ctx context.Context, sa *storedAuth, attempt modelListRe
 }
 
 type modelCatalogEntry struct {
-	Key             string          `json:"key"`
-	ModelKey        string          `json:"model_key"`
-	DisplayName     string          `json:"display_name"`
-	Source          string          `json:"source"`
-	Format          string          `json:"format"`
-	Enable          json.RawMessage `json:"enable"`
-	MaxInputTokens  json.Number     `json:"max_input_tokens"`
-	MaxOutputTokens json.Number     `json:"max_output_tokens"`
-	IsDefault       json.RawMessage `json:"is_default"`
-	IsVL            json.RawMessage `json:"is_vl"`
-	IsReasoning     json.RawMessage `json:"is_reasoning"`
-	ThinkingConfig  map[string]struct {
+	PriceFactor         json.RawMessage `json:"price_factor"`
+	OriginalPriceFactor json.RawMessage `json:"original_price_factor"`
+	Promotion           json.RawMessage `json:"promotion"`
+	Key                 string          `json:"key"`
+	ModelKey            string          `json:"model_key"`
+	DisplayName         string          `json:"display_name"`
+	Source              string          `json:"source"`
+	Format              string          `json:"format"`
+	Enable              json.RawMessage `json:"enable"`
+	MaxInputTokens      json.Number     `json:"max_input_tokens"`
+	MaxOutputTokens     json.Number     `json:"max_output_tokens"`
+	IsDefault           json.RawMessage `json:"is_default"`
+	IsVL                json.RawMessage `json:"is_vl"`
+	IsReasoning         json.RawMessage `json:"is_reasoning"`
+	ThinkingConfig      map[string]struct {
 		IsDefault bool                       `json:"is_default"`
 		Efforts   map[string]json.RawMessage `json:"efforts"`
 	} `json:"thinking_config"`
@@ -759,10 +763,15 @@ func handleModelsStatus() map[string]any {
 		out["cached"] = len(models)
 	}
 	var accounts []map[string]any
-	files, _ := hostAuthList()
+	files, err := hostAuthList()
+	if err != nil {
+		out["error"] = "账号列表获取失败"
+		return out
+	}
 	for _, f := range files {
 		sa, err := hostAuthGet(f.AuthIndex)
-		if err != nil || sa == nil || !strings.HasPrefix(sa.Auth.PersonalToken, "pt-") {
+		if err != nil || sa == nil {
+			accounts = append(accounts, map[string]any{"auth_index": f.AuthIndex, "name": f.Name, "source": "unknown", "error": "账号读取失败", "models": []any{}})
 			continue
 		}
 		models, ok := cachedDynamicModelsFor(modelCacheIdentity(sa))
@@ -770,6 +779,16 @@ func handleModelsStatus() map[string]any {
 		if !ok {
 			models = loadCatalog(sa)
 			source = "saved"
+		}
+		if len(models) == 0 {
+			dynamicModelsCache.RLock()
+			if old := dynamicModelsCache.entries[modelCacheIdentity(sa)]; old != nil {
+				models = append(models, old.models...)
+				if len(models) > 0 {
+					source = "cached"
+				}
+			}
+			dynamicModelsCache.RUnlock()
 		}
 		if len(models) == 0 {
 			if sa.region() == regionIntl {
@@ -782,30 +801,82 @@ func handleModelsStatus() map[string]any {
 		rows := make([]map[string]any, 0, len(models))
 		for _, model := range models {
 			row := map[string]any{"id": publicModelID(model.Name, model.ID), "name": model.Name, "context": model.ContextLength}
-			if meta, ok := metadataForModel(sa, model.ID); ok {
+			if meta, ok := metadataForModel(sa, model.ID); ok && source != "static" {
+				addPanelPricing(row, meta)
 				row["default_context"] = meta.contextLength()
 				row["max_context"] = meta.maxContextLength()
 				row["source"] = meta.Source
 			}
 			rows = append(rows, row)
 		}
-		accounts = append(accounts, map[string]any{"auth_index": f.AuthIndex, "name": sa.Account.Nickname, "region": sa.region(), "source": source, "models": rows})
+		account := map[string]any{"auth_index": f.AuthIndex, "name": sa.Account.Nickname, "region": sa.region(), "source": source, "models": rows}
+		dynamicModelsCache.RLock()
+		if entry := dynamicModelsCache.entries[modelCacheIdentity(sa)]; entry != nil && (source == "dynamic" || source == "cached") {
+			account["fetched_at"] = entry.fetched.UTC().Format(time.RFC3339)
+		}
+		dynamicModelsCache.RUnlock()
+		if source == "saved" {
+			if info, err := os.Stat(catalogCachePath(sa)); err == nil {
+				account["fetched_at"] = info.ModTime().UTC().Format(time.RFC3339)
+			}
+		}
+		if failure, ok := panelModelErrors.Load(modelCacheIdentity(sa)); ok {
+			account["error"] = failure
+		}
+		if failure, ok := panelModelAuthErrors.Load(f.AuthIndex); ok {
+			account["error"] = failure
+		}
+		accounts = append(accounts, account)
 	}
 	out["accounts"] = accounts
 	return out
 }
 
-// handleModelsRefresh clears the 5-minute cache and refetches the dynamic
-// catalog immediately. The static fallback is returned when every auth fails;
-// modelsStatus still records the per-account error.
+// handleModelsRefresh refreshes each account while retaining its last valid catalog.
 func handleModelsRefresh() map[string]any {
-	clearDynamicModelsCache()
-	clearModelsBackoff()
-	models := fetchDynamicModels()
-	return map[string]any{
-		"count":  len(models),
-		"status": currentModelsStatus(),
+	files, err := hostAuthList()
+	if err != nil {
+		return map[string]any{"error": "账号列表获取失败"}
 	}
+	clearModelsBackoff()
+	sem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+	var totalsMu sync.Mutex
+	count, succeeded := 0, 0
+	for _, file := range files {
+		f := file
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			sa, err := hostAuthGet(f.AuthIndex)
+			if err != nil || sa == nil {
+				panelModelAuthErrors.Store(f.AuthIndex, "账号读取失败")
+				return
+			}
+			panelModelAuthErrors.Delete(f.AuthIndex)
+			identity := modelCacheIdentity(sa)
+			models, err := callModelsForAuth(sa)
+			if err != nil || len(models) == 0 {
+				panelModelErrors.Store(identity, "模型刷新失败")
+				return
+			}
+			storeDynamicModelsFor(identity, models)
+			totalsMu.Lock()
+			count += len(models)
+			succeeded++
+			totalsMu.Unlock()
+			panelModelErrors.Delete(identity)
+		}()
+	}
+	wg.Wait()
+	if succeeded > 0 {
+		recordModelsStatus("dynamic", count, nil, nil)
+	}
+	out := handleModelsStatus()
+	out["count"] = count
+	return out
 }
 
 func cacheModelAliases(host pluginapi.HostConfigSummary) {

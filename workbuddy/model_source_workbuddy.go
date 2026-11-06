@@ -16,6 +16,7 @@ const modelSourceRequestTimeout = 15 * time.Second
 
 type modelFacts struct {
 	ID                        string   `json:"id"`
+	Credits                   string   `json:"credits,omitempty"`
 	Name                      string   `json:"name,omitempty"`
 	Description               string   `json:"description,omitempty"`
 	ContextLength             *int64   `json:"context_length,omitempty"`
@@ -98,12 +99,23 @@ type workBuddyAgentWire struct {
 }
 
 type workBuddyLegacyModelWire struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Description   string `json:"description"`
-	Disabled      bool   `json:"disabled"`
-	ContextWindow *int64 `json:"contextWindow"`
-	MaxTokens     *int64 `json:"maxTokens"`
+	Credits       json.RawMessage `json:"credits"`
+	ID            string          `json:"id"`
+	Name          string          `json:"name"`
+	Description   string          `json:"description"`
+	Disabled      bool            `json:"disabled"`
+	ContextWindow *int64          `json:"contextWindow"`
+	MaxTokens     *int64          `json:"maxTokens"`
+}
+
+// parseModelCredits treats malformed optional pricing as unavailable, without
+// allowing it to invalidate an otherwise usable upstream catalog.
+func parseModelCredits(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return strings.TrimSpace(s)
+	}
+	return ""
 }
 
 func parseWorkBuddyV3Config(raw []byte) ([]modelFacts, error) {
@@ -111,6 +123,7 @@ func parseWorkBuddyV3Config(raw []byte) ([]modelFacts, error) {
 		Code *int `json:"code"`
 		Data *struct {
 			Agents []workBuddyAgentWire `json:"agents"`
+			Models json.RawMessage      `json:"models"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &response); err != nil {
@@ -139,9 +152,22 @@ func parseWorkBuddyV3Config(raw []byte) ([]modelFacts, error) {
 		return nil, fmt.Errorf("v3 config cli agent is missing")
 	}
 
+	creditsByID := make(map[string]string)
+	var entries []json.RawMessage
+	_ = json.Unmarshal(response.Data.Models, &entries)
+	for _, raw := range entries {
+		var m struct {
+			ID      string          `json:"id"`
+			Credits json.RawMessage `json:"credits"`
+		}
+		if json.Unmarshal(raw, &m) == nil {
+			creditsByID[strings.TrimSpace(m.ID)] = parseModelCredits(m.Credits)
+		}
+	}
 	models := make([]modelFacts, len(modelIDs))
 	for i, id := range modelIDs {
 		models[i].ID = id
+		models[i].Credits = creditsByID[strings.TrimSpace(id)]
 	}
 	return validateModelFacts(models)
 }
@@ -167,6 +193,7 @@ func parseWorkBuddyLegacyModels(raw []byte) ([]modelFacts, error) {
 	for i, model := range response.Data.Models {
 		models[i] = modelFacts{
 			ID:                  model.ID,
+			Credits:             parseModelCredits(model.Credits),
 			Name:                model.Name,
 			Description:         model.Description,
 			ContextLength:       model.ContextWindow,

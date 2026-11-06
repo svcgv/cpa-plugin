@@ -174,6 +174,8 @@ func managementRegistration() managementRegistrationResponse {
 	return managementRegistrationResponse{
 		Routes: []managementRoute{
 			{Method: http.MethodGet, Path: base + "/desensitize", Description: "Get effective WorkBuddy desensitize runtime settings."},
+			{Method: http.MethodGet, Path: base + "/models/status", Description: "Per-account model credit rates."},
+			{Method: http.MethodPost, Path: base + "/models/refresh", Description: "Refresh per-account model catalogs."},
 			{Method: http.MethodGet, Path: base + "/accounts", Description: "List WorkBuddy accounts with credits, plan and check-in status."},
 			{Method: http.MethodGet, Path: base + "/egress-ip", Description: "Get the current egress IP through the active WorkBuddy HTTP route."},
 			{Method: http.MethodPost, Path: base + "/refresh", Description: "Force refresh quota/cache for all accounts."},
@@ -238,6 +240,10 @@ func handleManagement(raw []byte) ([]byte, error) {
 			"terms":   append([]string(nil), cfg.desensitizeTerms...),
 			"source":  cfg.desensitizeSource,
 		}))
+	case req.Method == http.MethodGet && path == base+"/models/status":
+		return okEnvelope(mgmtJSONResponse(http.StatusOK, handlePanelModelStatus()))
+	case req.Method == http.MethodPost && path == base+"/models/refresh":
+		return okEnvelope(mgmtJSONResponse(http.StatusOK, refreshPanelModels(req.HostCallbackID)))
 	case req.Method == http.MethodGet && path == base+"/accounts":
 		return okEnvelope(mgmtJSONResponse(http.StatusOK, buildDashboardExWithCallback(false, false, req.HostCallbackID)))
 	case req.Method == http.MethodGet && path == base+"/egress-ip":
