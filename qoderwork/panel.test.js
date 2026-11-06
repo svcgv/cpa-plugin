@@ -44,3 +44,17 @@ test('invalid PAT is not submitted', async () => {
   await context.importAuth({ innerHTML: '导入', dataset: {} });
   assert.equal(called, false);
 });
+
+test('model status renders numeric context lengths and escapes model names', async () => {
+  const { context, elements } = loadPanel('cn');
+  context.api = async route => route === '/models/context' ? {} : {
+    status: { source: 'dynamic' },
+    accounts: [{ name: 'account', region: 'cn', source: 'dynamic', models: [
+      { name: '<model>', id: 'model-id', default_context: 128000, max_context: 256000 },
+    ] }],
+  };
+  await context.loadContextSettings();
+  assert.equal(elements.get('modelSource').textContent, '模型目录：dynamic');
+  assert.match(elements.get('modelCatalog').innerHTML, /&lt;model&gt; \(model-id\)：128000 \/ 最大 256000/);
+  assert.equal(context.esc(0), '0');
+});

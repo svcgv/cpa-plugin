@@ -24,7 +24,7 @@
       "name": "QoderWork",
       "description": "QoderWork provider with CN and international PAT login, COSY model discovery and chat, daily campaign claims, per-region context settings and account-isolated model caches.",
       "author": "Sliverkiss",
-      "version": "0.5.14",
+      "version": "0.5.15",
       "repository": "https://github.com/Sliverkiss/cpa-plugin",
       "logo": "https://raw.githubusercontent.com/DGZSbot/ai-icon/refs/heads/main/QoderWork.png",
       "homepage": "https://github.com/Sliverkiss/cpa-plugin/tree/main/qoderwork",
