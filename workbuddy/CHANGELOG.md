@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.10.12
+
+### Fix WorkBuddy 11128 on CPA 8.0.61+ (role=developer / system-first)
+
+- CPA 8.0.61 changed the OpenAI Responses → Chat Completions translator to
+  preserve `role=developer` messages (upstream commit 00b76771, Closes #7174).
+  CodeBuddy's `/v2/chat/completions` only understands system/user/assistant/tool
+  and rejects that payload wholesale with HTTP 400 code 11128
+  `Illegal API invocation from an unapproved channel`, which made every
+  Responses-based client (Codex, pi, and others) fail after upgrading CPA.
+- `prepareUpstreamBody` now maps `developer` → `system` in place before
+  forwarding, so instruction text, order and authority are preserved while the
+  upstream schema is satisfied.
+- The leading-system guarantee now applies to both regions instead of Global
+  only, and no longer scans the whole conversation: CodeBuddy needs the FIRST
+  message to be a system prompt, so a system-less conversation gets a minimal
+  placeholder prepended. Responses that already lead with `system` are left
+  untouched, and the legacy `ensureSystemMessage` helper delegates to the same
+  implementation so it cannot drift.
+
 ## 0.10.4
 
 ### Fix panel OAuth link handling

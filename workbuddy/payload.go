@@ -11,13 +11,11 @@ import (
 	"strings"
 )
 
-// forceStreamBody returns the request body with "stream":true set, since the
-// upstream rejects non-streaming chat requests.
 // prepareUpstreamBody composes forceStreamBody + normalizeToolsForUpstream +
-// rewriteModelInBody + rewriteSystemForUpstream + ensureSystemMessage into a
-// single unmarshal/marshal pass (v0.6.31 perf: was 4-5 full JSON round-trips
-// on every chat completion). The 4 legacy helpers remain for tests and other
-// call sites that need them individually.
+// rewriteModelInBody + rewriteSystemForUpstream + normalizeMessageRoles +
+// ensureSystemMessage into a single unmarshal/marshal pass (v0.6.31 perf: was
+// 4-5 full JSON round-trips on every chat completion). The legacy helpers
+// remain for tests and other call sites that need them individually.
 func prepareUpstreamBody(payload, original []byte, sa *storedAuth, upstreamModel string) []byte {
 	src := payload
 	if len(src) == 0 {
@@ -40,13 +38,20 @@ func prepareUpstreamBody(payload, original []byte, sa *storedAuth, upstreamModel
 	// 3. rewriteModel: swap client model name to upstream model id.
 	rewriteModelInPlace(obj, upstreamModel)
 
-	// 4. system sanitization: strip blocked Claude Code template phrases.
+	// 4. message roles: CodeBuddy only speaks system/user/assistant/tool, so a
+	// developer message (preserved by CPA >= 8.0.61 responses→chat translation)
+	// must become a system message or the upstream rejects the whole request
+	// with 400 code 11128 "Illegal API invocation from an unapproved channel".
+	normalizeMessageRolesInPlace(obj)
+
+	// 5. system sanitization: strip blocked Claude Code template phrases.
 	rewriteSystemInPlace(obj)
 
-	// 5. desensitize the configured prompt and tool metadata fields.
+	// 6. desensitize the configured prompt and tool metadata fields.
 	applyDesensitizeInPlace(obj, currentFeatureRuntime())
 
-	// 6. ensureSystemMessage: inject minimal system msg for Global only.
+	// 7. ensureSystemMessage: CodeBuddy requires the first message to be a
+	// system prompt; inject a minimal one when the conversation has none.
 	ensureSystemMessageInPlace(obj, sa)
 
 	out, err := json.Marshal(obj)
@@ -132,30 +137,71 @@ func rewriteSystemInPlace(obj map[string]any) bool {
 	return changed
 }
 
-// ensureSystemMessageInPlace is the in-place form of ensureSystemMessage.
-// Returns true when obj was modified.
-func ensureSystemMessageInPlace(obj map[string]any, sa *storedAuth) bool {
-	if sa == nil || !isGlobalDomain(sa.Auth.Domain) {
-		return false
-	}
+// normalizeMessageRolesInPlace maps OpenAI Responses-only roles onto the
+// CodeBuddy chat schema. A developer message carries operator instructions and
+// maps 1:1 onto system; any other unrecognized role is treated as system too so
+// the request is still served instead of being refused wholesale.
+func normalizeMessageRolesInPlace(obj map[string]any) bool {
 	messages, ok := obj["messages"].([]any)
 	if !ok || len(messages) == 0 {
 		return false
 	}
+	changed := false
+	valid := map[string]struct{}{"system": {}, "user": {}, "assistant": {}, "tool": {}, "function": {}}
 	for _, m := range messages {
-		msg, ok := m.(map[string]any)
-		if !ok {
+		msg, okMsg := m.(map[string]any)
+		if !okMsg {
 			continue
 		}
-		if role, _ := msg["role"].(string); strings.EqualFold(role, "system") {
+		role, _ := msg["role"].(string)
+		normalized := strings.ToLower(strings.TrimSpace(role))
+		if normalized == "developer" {
+			msg["role"] = "system"
+			changed = true
+			continue
+		}
+		if _, known := valid[normalized]; known {
+			if normalized != role {
+				msg["role"] = normalized
+				changed = true
+			}
+			continue
+		}
+		msg["role"] = "system"
+		changed = true
+	}
+	return changed
+}
+
+// ensureSystemMessageInPlace guarantees the conversation's FIRST message is a
+// system prompt. Returns true when obj was modified.
+//
+// CodeBuddy rejects a chat that does not open with a system prompt with 400 code
+// 11128 "Illegal API invocation from an unapproved channel" (or 11101 invalid
+// request). Developer instructions are folded into system in place by
+// normalizeMessageRolesInPlace — verified upstream behavior, so a mid-session
+// system message is accepted and keeps its position. This only covers the case
+// where no system instruction leads the conversation at all.
+//
+// Both regions reject the system-less opening, so injection is no longer
+// Global-only: CN tolerates the placeholder exactly like Global does.
+func ensureSystemMessageInPlace(obj map[string]any, sa *storedAuth) bool {
+	_ = sa // region-independent: CN rejects a system-less opening too.
+	messages, ok := obj["messages"].([]any)
+	if !ok || len(messages) == 0 {
+		return false
+	}
+	first, _ := messages[0].(map[string]any)
+	if first != nil {
+		if role, _ := first["role"].(string); strings.EqualFold(strings.TrimSpace(role), "system") {
 			return false
 		}
 	}
-	systemMsg := map[string]any{
+	placeholder := map[string]any{
 		"role":    "system",
 		"content": "You are a helpful assistant.",
 	}
-	obj["messages"] = append([]any{systemMsg}, messages...)
+	obj["messages"] = append([]any{placeholder}, messages...)
 	return true
 }
 
@@ -317,41 +363,20 @@ func rewriteSystemForUpstream(payload []byte) []byte {
 	return out
 }
 
-// ensureSystemMessage injects a minimal system message if none is present.
-// Global (www.workbuddy.ai) rejects user-only requests with code 11101
-// "Parse message failed: 11101:invalid request". CN (copilot.tencent.com)
-// does not require a system message but tolerates one. Inserting a
-// harmless system message unifies both paths.
+// ensureSystemMessage injects a minimal system message when the conversation
+// does not already open with one. It delegates to the in-place form so the
+// legacy standalone path cannot drift from prepareUpstreamBody.
 func ensureSystemMessage(payload []byte, sa *storedAuth) []byte {
 	if len(payload) == 0 {
-		return payload
-	}
-	// Only inject for Global; CN doesn't need it and we minimize diff.
-	if sa == nil || !isGlobalDomain(sa.Auth.Domain) {
 		return payload
 	}
 	var obj map[string]any
 	if json.Unmarshal(payload, &obj) != nil {
 		return payload
 	}
-	messages, ok := obj["messages"].([]any)
-	if !ok || len(messages) == 0 {
+	if !ensureSystemMessageInPlace(obj, sa) {
 		return payload
 	}
-	for _, m := range messages {
-		msg, ok := m.(map[string]any)
-		if !ok {
-			continue
-		}
-		if role, _ := msg["role"].(string); strings.EqualFold(role, "system") {
-			return payload // already has system message
-		}
-	}
-	systemMsg := map[string]any{
-		"role":    "system",
-		"content": "You are a helpful assistant.",
-	}
-	obj["messages"] = append([]any{systemMsg}, messages...)
 	out, err := json.Marshal(obj)
 	if err != nil {
 		return payload
