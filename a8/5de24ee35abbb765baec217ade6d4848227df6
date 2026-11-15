@@ -1,0 +1,55 @@
+qoderwork/main.go
+  s_3feb248fe2c024::t_2677cf953d05ca 340
+workbuddy/main.go
+  s_3feb248fe2c024::t_2677cf953d05ca 349
+workbuddy/sanitize_test.go
+  s_3feb248fe2c024::t_3cede20554d734 15-42,45-46,55-85,90,96-97,107-109,111-116
+  s_3feb248fe2c024::t_3ea755da4f4f4a 43-44,47-54
+shared/contextrules/contextrules.go
+  s_3feb248fe2c024::t_f79f245f88d755 22,24,80-85
+  s_3feb248fe2c024::t_e36dc751aa582a 33
+  s_3feb248fe2c024::t_5e4669e8ac157a 2,13,15,63,93,96,99,131
+  s_3feb248fe2c024::t_5d1067cedf9abf 21,69,72,75-77,86-87
+  s_3feb248fe2c024::t_d37082481b5202 25,89-92,94-95,97-98,100-101,103-104,106-107
+  s_3feb248fe2c024::t_bbf0ff3b4f8f5f 31-32,34-37,68,108-123
+  s_3feb248fe2c024::t_583db75b8ae83f 40-41,43,133
+  s_3feb248fe2c024::t_e9ba652d351653 17,20,42,44,57,59-60,66-67,78-79,124,141
+  s_3feb248fe2c024::t_82f2ba315c50d1 3,11-12,45-47,49-51,58,61,102,105
+  s_3feb248fe2c024::t_bd8361f865d32a 26-30
+shared/contextrules/contextrules_test.go
+  s_3feb248fe2c024::t_7bffd0e8909057 67-76,85,110,137-138
+  s_3feb248fe2c024::t_df551e2f24a6de 18,28,33,55-56,78,93-94,115,121-123,125-126,128,131,139-143,146-155
+  s_3feb248fe2c024::t_874fbace3b1a9a 17,22-27,32,37-42,45-47,50-51,82-84,86,97-99,102,106,108-109,124,127,129-130,132,145
+  s_3feb248fe2c024::t_181aca4f90c3a2 157-173,214
+  s_3feb248fe2c024::t_59277f5c0d7739 52,60-61,120
+  s_3feb248fe2c024::t_56a490322b3729 144
+  s_3feb248fe2c024::t_607b05672290e0 43-44,48-49,65-66,77,87,92,107
+  s_3feb248fe2c024::t_ae0a69c979aadc 53-54,57-59,62-64,133-136
+  s_3feb248fe2c024::t_0749656a8cea6d 3-8,156,174-213
+registry.json
+  s_3feb248fe2c024::t_2677cf953d05ca 9,27
+qoderwork/CHANGELOG.md
+  s_3feb248fe2c024::t_0f52ee7f50aba9 3-19
+qoderwork/VERSION
+  s_3feb248fe2c024::t_366a05602e15a2 1
+workbuddy/CHANGELOG.md
+  s_3feb248fe2c024::t_b240146f7a268b 3-19
+workbuddy/VERSION
+  s_3feb248fe2c024::t_c368be4ecd074c 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a85de24ee35abbb765baec217ade6d4848227df6",
+  "prompts": {},
+  "sessions": {
+    "s_3feb248fe2c024": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dd83-1690-7303-a5d7-59d9ce2cc906",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
