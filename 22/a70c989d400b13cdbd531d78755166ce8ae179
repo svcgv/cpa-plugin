@@ -1,0 +1,27 @@
+shared/contextrules/contextrules.go
+  s_3feb248fe2c024::t_914fcd1a8ececf 47
+workbuddy/system_sanitize_test.go
+  s_3feb248fe2c024::t_e77204d18eb355 34
+  s_3feb248fe2c024::t_a7d89011d6158d 1-30,36-66
+  s_3feb248fe2c024::t_6cb69dd2111966 31-33,35
+workbuddy/payload.go
+  s_3feb248fe2c024::t_2e2c0f87f78156 148-150,488-517
+  s_3feb248fe2c024::t_ee5712964afa36 126-132,135-144,146-147,154
+  s_3feb248fe2c024::t_15e2345c34baf6 518
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "22a70c989d400b13cdbd531d78755166ce8ae179",
+  "prompts": {},
+  "sessions": {
+    "s_3feb248fe2c024": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dd83-1690-7303-a5d7-59d9ce2cc906",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
