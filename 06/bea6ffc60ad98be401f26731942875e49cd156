@@ -1,0 +1,22 @@
+workbuddy/payload.go
+  s_c1649871d67812::t_9b061ef2b592d9 420-421,439-444
+qoderwork/body.go
+  s_c1649871d67812::t_f453ad4d259e32 546,564-638
+  s_c1649871d67812::t_6c1a135ea2c919 639
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "06bea6ffc60ad98be401f26731942875e49cd156",
+  "prompts": {},
+  "sessions": {
+    "s_c1649871d67812": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dd56-e5a5-7301-977e-d0d71d0fbc78",
+        "model": "ccs-pipio-claude/claude-opus-5-5"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
