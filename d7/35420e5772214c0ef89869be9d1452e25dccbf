@@ -1,0 +1,31 @@
+qoderwork/CHANGELOG.md
+  s_e64306272e88ad::t_692d780df52933 3-9
+qoderwork/VERSION
+  s_e64306272e88ad::t_675bf7baff37c7 1
+qoderwork/main.go
+  s_e64306272e88ad::t_2ec4cebfb41aab 340
+registry.json
+  s_e64306272e88ad::t_2bf941388aa4e5 9,27
+workbuddy/CHANGELOG.md
+  s_e64306272e88ad::t_3b07452b0da8d3 3-9
+workbuddy/VERSION
+  s_e64306272e88ad::t_3cd0d437e8cd7e 1
+workbuddy/main.go
+  s_e64306272e88ad::t_6e402572175a5f 349
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d735420e5772214c0ef89869be9d1452e25dccbf",
+  "prompts": {},
+  "sessions": {
+    "s_e64306272e88ad": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dd62-3b66-70c2-ba4b-7780acf8e35c",
+        "model": "unknown"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
