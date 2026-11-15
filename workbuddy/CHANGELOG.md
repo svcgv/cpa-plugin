@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.10.15
+
+### Fix shared fingerprint sanitization
+
+- Repair the shared `contextrules` rule set: the previous extraction made every
+  rewrite a no-op (source identical to target), the billing-header regex was
+  truncated, and the tests asserted rewritten strings as their own input.
+- Anchor the billing-header strip to the real CPA output (`cch=<hex>;cc_*` at
+  the start of system[0]) instead of the stale `x-anthropic-billing-header`
+  prefix, so the header is actually removed.
+- Add fingerprints: VSCode Claude Code plugin Agent SDK identity, Codex GPT and
+  `You are Codex, a coding agent based on GPT-5` variants, the Codex CLI
+  open-source declaration, and Antigravity.
+- Add DeepSeek harness (`deepseek.com/harness`) identity lines verified against
+  upstream source, plus fallbacks for older phrasings, and validate against 94
+  real harness system-prompt snapshots.
+
 ## 0.10.14
 
 ### Extend blocked-template sanitization
