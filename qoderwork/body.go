@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Sliverkiss/cpa-plugin/shared/contextrules"
 	"github.com/google/uuid"
 )
 
@@ -561,52 +562,8 @@ func buildQoderBody(req *openAIRequest, modelKey, userType string, sa *storedAut
 	return json.Marshal(base)
 }
 
-// qoderSanitizeFeatures 是 Qoder 上游会触发 11128 的系统提示指纹。
-var qoderSanitizeFeatures = []string{
-	"x-anthropic-billing-header",
-	"You are Claude Code",
-	"Main branch (",
-	"You are a coding agent running in the Codex CLI",
-	"github.com/anthropics/",
-}
-
-var qoderSanitizeBillingHeaderRE = regexp.MustCompile(`(?i)x-anthropic-billing-header:[^;\n]*;?\s*`)
-var qoderSanitizeCCEntrypointRE  = regexp.MustCompile(`(?i)\bcc_entrypoint=`)
-var qoderSanitizeCCKeyValueRE    = regexp.MustCompile(`(?i)\bcc_[a-z0-9_]+=[^;\n]*;?\s*`)
-
-// sanitizeQoderText 净化单段文本中被 Qoder 网关拦截的指纹。
 func sanitizeQoderText(s string) string {
-	needsSanitize := qoderSanitizeCCEntrypointRE.MatchString(s) || qoderSanitizeBillingHeaderRE.MatchString(s)
-	if !needsSanitize {
-		for _, f := range qoderSanitizeFeatures {
-			if strings.Contains(s, f) {
-				needsSanitize = true
-				break
-			}
-		}
-	}
-	if !needsSanitize {
-		return s
-	}
-	original := s
-	s = strings.ReplaceAll(s,
-		"You are Claude Code, Anthropic's official CLI for Claude.",
-		"You are Claude Code, Anthropic's official CLI tool for Claude.")
-	s = strings.ReplaceAll(s,
-		"Main branch (you will usually use this for PRs)",
-		"Default branch (you will usually use this for PRs)")
-	s = strings.ReplaceAll(s,
-		"You are a coding agent running in the Codex CLI, a terminal-based coding assistant.",
-		"You are a coding agent running in the Codex CLI tool, a terminal-based coding assistant.")
-	s = strings.ReplaceAll(s,
-		"To give feedback, users should report the issue at https://github.com/anthropics/claude-code/issues",
-		"To provide feedback, users should report the issue at https://github.com/anthropics/claude-code/issues")
-	s = qoderSanitizeBillingHeaderRE.ReplaceAllString(s, "")
-	s = qoderSanitizeCCKeyValueRE.ReplaceAllString(s, "")
-	if s == original {
-		return original
-	}
-	return strings.TrimSpace(s)
+	return contextrules.Sanitize(s)
 }
 
 // sanitizeQoderMessages 净化消息数组中所有文本字段。

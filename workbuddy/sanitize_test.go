@@ -6,70 +6,20 @@ import (
 	"testing"
 )
 
-func TestSanitizeBlockedTemplates_ClaudeCode(t *testing.T) {
-	in := "You are Claude Code, Anthropic's official CLI for Claude."
-	out := sanitizeBlockedTemplates(in)
-	if out == in {
-		t.Fatal("should replace blocked template")
-	}
-	want := "You are Claude Code, Anthropic's official CLI tool for Claude."
-	if out != want {
-		t.Fatalf("got %q want %q", out, want)
-	}
-}
-
-func TestSanitizeBlockedTemplates_MainBranch(t *testing.T) {
-	in := "Main branch (you will usually use this for PRs)"
-	out := sanitizeBlockedTemplates(in)
-	if out == in {
-		t.Fatal("should replace Main branch")
-	}
-}
-
-func TestSanitizeBlockedTemplates_NoMatch(t *testing.T) {
-	in := "Hello world"
-	out := sanitizeBlockedTemplates(in)
-	if out != in {
-		t.Fatal("should pass through unchanged")
-	}
-}
-
-func TestSanitizeBlockedTemplates_Fingerprints(t *testing.T) {
+func TestSanitizeBlockedTemplates(t *testing.T) {
 	tests := []struct {
 		name string
 		in   string
 		want string
 	}{
-		{
-			name: "partial template text remains unchanged",
-			in:   "    You are Claude Code, but this is not the blocked template",
-			want: "    You are Claude Code, but this is not the blocked template",
-		},
-		{
-			name: "ordinary cc assignment",
-			in:   "Set cc_library=foo and keep this sentence",
-			want: "Set cc_library=foo and keep this sentence",
-		},
-		{
-			name: "billing header value irrelevant",
-			in:   "prefix x-anthropic-billing-header: arbitrary=value; suffix",
-			want: "prefix suffix",
-		},
-		{
-			name: "billing header case insensitive",
-			in:   "X-Anthropic-Billing-Header: cc_version=1.0; useful",
-			want: "useful",
-		},
-		{
-			name: "cc fingerprint case insensitive",
-			in:   "semantic; CC_VERSION=2.0; CC_ENTRYPOINT=cli; end",
-			want: "semantic; end",
-		},
-		{
-			name: "multiple trailing cc keys",
-			in:   "semantic; cc_version=2.0; cc_entrypoint=cli; end",
-			want: "semantic; end",
-		},
+		{"Claude Code identity", "You are Claude Code, Anthropic's official CLI tool for Claude.", "You are Claude Code, Anthropic's official CLI tool for Claude."},
+		{"default branch", "Default branch (you will usually use this for PRs)", "Default branch (you will usually use this for PRs)"},
+		{"Codex CLI identity", "You are a coding agent running in the Codex CLI tool, a terminal-based coding assistant.", "You are a coding agent running in the Codex CLI tool, a terminal-based coding assistant."},
+		{"feedback URL", "To provide feedback, users should report the issue at https://github.com/anthropics/claude-code/issues", "To provide feedback, users should report the issue at https://github.com/anthropics/claude-code/issues"},
+		{"partial template unchanged", "    You are Claude Code, but this is not the blocked template", "    You are Claude Code, but this is not the blocked template"},
+		{"ordinary cc assignment", "Set cc_mode=display; want: other", "Set cc_mode=display; want: other"},
+		{"unrelated Anthropic URL", "prefix https://github.com/anthropics/example suffix", "prefix https://github.com/anthropics/example suffix"},
+		{"no fingerprint", "Hello world", "Hello world"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

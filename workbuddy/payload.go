@@ -7,8 +7,9 @@ package main
 
 import (
 	"encoding/json"
-	"regexp"
 	"strings"
+
+	"github.com/Sliverkiss/cpa-plugin/shared/contextrules"
 )
 
 // prepareUpstreamBody composes forceStreamBody + normalizeToolsForUpstream +
@@ -413,53 +414,12 @@ func rewriteContentField(msg map[string]any) bool {
 	return false
 }
 
-var sanitizeFeatures = []string{
-	"x-anthropic-billing-header",
-	"You are Claude Code",
-	"Main branch (",
-	"You are a coding agent running in the Codex CLI",
-	"github.com/anthropics/",
-}
-
-var sanitizeBillingHeaderRE = regexp.MustCompile(`(?i)x-anthropic-billing-header:[^;\n]*;?\s*`)
-var sanitizeCCEntrypointRE = regexp.MustCompile(`(?i)\bcc_entrypoint=`)
-var sanitizeCCKeyValueRE = regexp.MustCompile(`(?i)\bcc_[a-z0-9_]+=[^;\n]*;?\s*`)
-
 func sanitizeBlockedTemplates(s string) string {
-	if !hasFingerprint(s) {
-		return s
-	}
-	original := s
-	s = strings.ReplaceAll(s,
-		"You are Claude Code, Anthropic's official CLI for Claude.",
-		"You are Claude Code, Anthropic's official CLI tool for Claude.")
-	s = strings.ReplaceAll(s,
-		"Main branch (you will usually use this for PRs)",
-		"Default branch (you will usually use this for PRs)")
-	s = strings.ReplaceAll(s,
-		"You are a coding agent running in the Codex CLI, a terminal-based coding assistant.",
-		"You are a coding agent running in the Codex CLI tool, a terminal-based coding assistant.")
-	s = strings.ReplaceAll(s,
-		"To give feedback, users should report the issue at https://github.com/anthropics/claude-code/issues",
-		"To provide feedback, users should report the issue at https://github.com/anthropics/claude-code/issues")
-	s = sanitizeBillingHeaderRE.ReplaceAllString(s, "")
-	s = sanitizeCCKeyValueRE.ReplaceAllString(s, "")
-	if s == original {
-		return original
-	}
-	return strings.TrimSpace(s)
+	return contextrules.Sanitize(s)
 }
 
 func hasFingerprint(s string) bool {
-	if sanitizeCCEntrypointRE.MatchString(s) {
-		return true
-	}
-	for _, feature := range sanitizeFeatures {
-		if strings.Contains(s, feature) {
-			return true
-		}
-	}
-	return sanitizeBillingHeaderRE.MatchString(s)
+	return contextrules.HasFingerprint(s)
 }
 
 // rewriteModelInBody replaces the "model" field of a chat-completions body
