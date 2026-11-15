@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.10.17
+
+### Send the MaaS source headers CodeBuddy requires
+
+- The CodeBuddy upstream only routes a chat request through a registered
+  channel; a request without `x-source-channel-id` is rejected with
+  HTTP 400 code 11128 "Illegal API invocation from an unapproved channel",
+  which is what the deepseek-harness client saw.
+- Emit the channel header set found in the official
+  `@tencent-ai/codebuddy-code` bundle: `x-source-channel-id`
+  (`workbuddy-enterprise`), `x-source-model-type`, `x-source-client-type` and
+  `x-source-enterprise-id`, plus `x-inference-caller`.
+- Enterprise accounts hash their id with HMAC-SHA256 keyed by the channel id;
+  consumer accounts send an empty value and stay on the `builtin` model type.
+
+### Sanitize the codebuddy-code system prompt
+
+- Cover the identity lines the official CLI injects (`You are the default
+  Agent in this directory.`, `You are a colleague, not CodeBuddy.`,
+  `CODEBUDDY.md instructions (trusted user configuration):`, the ultracode
+  effort notice and the Agent Home channel preambles) so they are paraphrased
+  instead of reaching the upstream channel filter.
+
 ## 0.10.16
 
 ### Sanitize the top-level system field

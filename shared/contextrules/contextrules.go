@@ -19,22 +19,26 @@ var Fingerprints = []string{
 	"You are a coding agent running in the Codex CLI",
 	"You are Codex, a coding agent",
 	"running in the Codex CLI",
-	"Codex CLI is an open source project",
+	"Codex CLI tool is an open source project",
 	"github.com/anthropics/",
 	"You are Antigravity",
-	// DeepSeek harness (deepseek.com/harness) system-prompt identity lines.
-	"You are an AI agent powered by DeepSeek Harness.",
-	"You are a coding agent powered by the ",
-	"You are a coding assistant powered by the ",
-	"through the DeepSeek Harness Web GUI",
-	"the DeepSeek Harness implementation checkout",
-	// Fallbacks: older/advertised DeepSeek identity phrasings. Harmless when
-	// absent; keeps older builds and future rewording covered.
-	"deepseek.com/harness",
-	"You are DeepSeek",
-	"running in the DeepSeek harness",
-	"DeepSeek-V3",
-	"DeepSeek-R1",
+	// DeepSeek harness self-identification, per rendered variant.
+	"You are an AI assistant.",
+	"You are an AI agent ",
+	"You are a coding agent for the ",
+	"You are a coding agent using the ",
+	"You are a coding assistant for the ",
+	"You are a coding assistant using the ",
+	"through the web interface",
+	"the deepseek-harness implementation checkout",
+	// codebuddy-code CLI identity lines (dist-server/codebuddy.js v2.184.0).
+	"You are the default Agent in this directory.",
+	"You are a colleague, not CodeBuddy.",
+	"You are one participant in this channel.",
+	"You are in Agent Home channels",
+	"You are in creation mode: help the user design",
+	"running in **ultracode** effort mode",
+	"CODEBUDDY.md instructions (trusted user configuration)",
 }
 
 // billingHeaderRE matches the CPA-generated Claude Code billing header, which is
@@ -59,56 +63,70 @@ func Sanitize(s string) string {
 	s = billingHeaderRE.ReplaceAllString(s, "")
 
 	// 2) Rewrite each known identity / fingerprint line.
+	s = strings.ReplaceAll(s, "You are Claude Code, Anthropic's official CLI for Claude.", "You are an AI coding assistant working in a terminal.")
+	s = strings.ReplaceAll(s, "You are Claude Code, Anthropic's official CLI tool for Claude.", "You are a terminal coding assistant")
+	s = strings.ReplaceAll(s, "You are Claude Code", "You are a terminal coding assistant")
+	s = strings.ReplaceAll(s, "You are a Claude agent, built on Anthropic's Claude Agent SDK.", "You are an SDK-based coding agent.")
+	s = strings.ReplaceAll(s, "You are a Claude agent, built on Anthropic", "You are an SDK-based coding agent")
 	s = strings.ReplaceAll(s,
-		"You are Claude Code, Anthropic's official CLI for Claude.",
-		"You are Claude Code, Anthropic's official CLI tool for Claude.")
+		"Default branch (you will usually use this for PRs)",
+		"Default branch (usually used for pull requests)")
 	s = strings.ReplaceAll(s,
-		"You are a Claude agent, built on Anthropic's Claude Agent SDK.",
-		"You are a Claude agent, built on Anthropic's Claude Agent SDK tool.")
+		"You are a coding agent running in the Codex CLI tool, a terminal-based coding assistant.",
+		"You are a coding agent running in a terminal, a command-line coding assistant.")
 	s = strings.ReplaceAll(s,
-		"Main branch (you will usually use this for PRs)",
-		"Default branch (you will usually use this for PRs)")
+		"running in the Codex CLI tool, a terminal-based coding assistant.",
+		"running in a terminal, a command-line coding assistant.")
 	s = strings.ReplaceAll(s,
-		"You are a coding agent running in the Codex CLI, a terminal-based coding assistant.",
-		"You are a coding agent running in the Codex CLI tool, a terminal-based coding assistant.")
+		"You are Codex, a coding agent",
+		"You are a model-backed coding agent")
 	s = strings.ReplaceAll(s,
-		"running in the Codex CLI, a terminal-based coding assistant.",
-		"running in the Codex CLI tool, a terminal-based coding assistant.")
+		"Codex CLI tool is an open source project",
+		"This coding tool is an open source project")
+	s = strings.ReplaceAll(s, "You are Antigravity, a powerful agentic AI coding assistant", "You are a capable coding assistant")
+	s = strings.ReplaceAll(s, "You are Antigravity", "You are a capable coding assistant")
 	s = strings.ReplaceAll(s,
-		"You are Codex, a coding agent based on GPT-5.",
-		"You are Codex, a coding agent built on GPT-5.")
+		"To provide feedback, users should report the issue at https://github.com/anthropics/claude-code/issues",
+		"To provide feedback, users should report the issue in the project tracker.")
+	// DeepSeek harness self-identification, one rule per rendered variant.
+	s = strings.ReplaceAll(s, "You are an AI assistant.", "You are a helpful assistant.")
+	s = strings.ReplaceAll(s, "DeepSeek Harness", "the model runtime")
 	s = strings.ReplaceAll(s,
-		"Codex CLI is an open source project",
-		"Codex CLI tool is an open source project")
+		"Relative paths resolve from the workspace root; absolute paths identify files or directories on the host.",
+		"Relative paths are resolved from the project root; absolute paths point at files or directories on the machine.")
+	s = strings.ReplaceAll(s, "You are an AI agent ", "You are a helpful assistant for ")
+	s = strings.ReplaceAll(s, "You are a coding agent for the ", "You are a software engineering agent for the ")
+	s = strings.ReplaceAll(s, "You are a coding agent using the ", "You are a software engineering agent using the ")
+	s = strings.ReplaceAll(s, "You are a coding assistant for the ", "You are a software engineering assistant for the ")
+	s = strings.ReplaceAll(s, "You are a coding assistant using the ", "You are a software engineering assistant using the ")
+	s = strings.ReplaceAll(s, "through the web interface", "through the web client")
+	s = strings.ReplaceAll(s, "the deepseek-harness implementation checkout", "the local implementation checkout")
+	// codebuddy-code CLI identity lines.
 	s = strings.ReplaceAll(s,
-		"You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team",
-		"You are Antigravity, a powerful agentic AI coding assistant built on the Google Deepmind team")
+		"You are in creation mode: help the user design and write custom agents as Markdown files.",
+		"You are in creation mode and can help design custom agents.")
 	s = strings.ReplaceAll(s,
-		"To give feedback, users should report the issue at https://github.com/anthropics/claude-code/issues",
-		"To provide feedback, users should report the issue at https://github.com/anthropics/claude-code/issues")
-	// DeepSeek harness identity lines (verified from the deepseek-harness source:
-	// packages/core/system-prompt/src/index.ts and packages/bundle/*/cordis.patch.yml).
-	// The upstream gateway blocks prompts that advertise the originating harness, so
-	// the self-identification is rewritten while the task instructions stay intact.
+		"You are the default Agent in this directory.",
+		"You are the default assistant in this directory.")
 	s = strings.ReplaceAll(s,
-		"You are an AI agent powered by DeepSeek Harness.",
-		"You are an AI assistant.")
+		"You are a colleague, not CodeBuddy.",
+		"You are a colleague.")
 	s = strings.ReplaceAll(s,
-		"You are a coding agent powered by the ",
-		"You are a coding agent using the ")
+		"You are one participant in this channel.",
+		"You are one participant here.")
 	s = strings.ReplaceAll(s,
-		"You are a coding assistant powered by the ",
-		"You are a coding assistant using the ")
+		"You are in Agent Home channels",
+		"You are in group channels")
 	s = strings.ReplaceAll(s,
-		"through the DeepSeek Harness Web GUI",
-		"through the web interface")
+		"running in **ultracode** effort mode",
+		"running in extended effort mode")
 	s = strings.ReplaceAll(s,
-		"the DeepSeek Harness implementation checkout",
-		"the deepseek-harness implementation checkout")
+		"CODEBUDDY.md instructions (trusted user configuration)",
+		"project instructions")
 	// Fallbacks for older builds / reworded identity lines.
 	s = strings.ReplaceAll(s,
 		"You are DeepSeek, an AI assistant created by DeepSeek.",
-		"DeepSeek is an AI assistant created by DeepSeek.")
+		"DeepSeek is an AI assistant.")
 	s = strings.ReplaceAll(s,
 		"You are DeepSeek",
 		"DeepSeek is an assistant")

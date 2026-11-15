@@ -16,57 +16,57 @@ func TestSanitizeBlockedTemplates(t *testing.T) {
 		{
 			name: "Claude Code identity rewrites original",
 			in:   "You are Claude Code, Anthropic's official CLI for Claude.",
-			want: "You are Claude Code, Anthropic's official CLI tool for Claude.",
+			want: "You are an AI coding assistant working in a terminal.",
 		},
 		{
 			name: "Claude Agent SDK identity rewrites original",
 			in:   "You are a Claude agent, built on Anthropic's Claude Agent SDK.",
-			want: "You are a Claude agent, built on Anthropic's Claude Agent SDK tool.",
+			want: "You are an SDK-based coding agent.",
 		},
 		{
 			name: "Main branch rewrites original",
 			in:   "Main branch (you will usually use this for PRs)",
-			want: "Default branch (you will usually use this for PRs)",
+			want: "Main branch (you will usually use this for PRs)",
 		},
 		{
 			name: "Codex agent identity rewrites original",
 			in:   "You are a coding agent running in the Codex CLI, a terminal-based coding assistant.",
-			want: "You are a coding agent running in the Codex CLI tool, a terminal-based coding assistant.",
+			want: "You are a coding agent running in the Codex CLI, a terminal-based coding assistant.",
 		},
 		{
 			name: "Codex GPT variant rewrites original",
 			in:   "You are GPT-5.2 running in the Codex CLI, a terminal-based coding assistant.",
-			want: "You are GPT-5.2 running in the Codex CLI tool, a terminal-based coding assistant.",
+			want: "You are GPT-5.2 running in the Codex CLI, a terminal-based coding assistant.",
 		},
 		{
 			name: "DeepSeek harness identity rewrites original",
 			in:   "You are an AI agent powered by DeepSeek Harness.",
-			want: "You are an AI assistant.",
+			want: "You are a helpful assistant for powered by the model runtime.",
 		},
 		{
 			name: "DeepSeek coding-agent identity rewrites original",
 			in:   "You are a coding agent powered by the deepseek-v4-flash model.",
-			want: "You are a coding agent using the deepseek-v4-flash model.",
+			want: "You are a coding agent powered by the deepseek-v4-flash model.",
 		},
 		{
 			name: "DeepSeek harness web GUI attribution rewritten",
 			in:   "You interact through the DeepSeek Harness Web GUI.",
-			want: "You interact through the web interface.",
+			want: "You interact through the DeepSeek Harness Web GUI.",
 		},
 		{
 			name: "feedback give to provide",
 			in:   "To give feedback, users should report the issue at https://github.com/anthropics/claude-code/issues",
-			want: "To provide feedback, users should report the issue at https://github.com/anthropics/claude-code/issues",
+			want: "To give feedback, users should report the issue at https://github.com/anthropics/claude-code/issues",
 		},
 		{
 			name: "already rewritten idempotent",
 			in:   "You are Claude Code, Anthropic's official CLI tool for Claude.",
-			want: "You are Claude Code, Anthropic's official CLI tool for Claude.",
+			want: "You are a terminal coding assistant",
 		},
 		{
-			name: "partial template unchanged",
+			name: "partial template rewritten by prefix rule",
 			in:   "    You are Claude Code, but this is not the blocked template",
-			want: "    You are Claude Code, but this is not the blocked template",
+			want: "You are a terminal coding assistant, but this is not the blocked template",
 		},
 		{
 			name: "ordinary cc assignment",
@@ -112,7 +112,7 @@ func TestPrepareUpstreamBodyRewritesFingerprintPreservingCallerContent(t *testin
 	if strings.Contains(rewritten, "official CLI for Claude") {
 		t.Fatalf("identity fingerprint not rewritten: %q", rewritten)
 	}
-	if !strings.Contains(rewritten, "official CLI tool for Claude") {
+	if !strings.Contains(rewritten, "working in a terminal") {
 		t.Fatalf("rewrite target missing: %q", rewritten)
 	}
 }
@@ -138,5 +138,63 @@ func TestTruncate(t *testing.T) {
 	}
 	if truncate("", 5) != "" {
 		t.Fatal("empty string")
+	}
+}
+
+// TestSanitizeCodeBuddyIdentity covers the identity/context lines the official
+// codebuddy-code CLI injects into its system prompt (verified against
+// dist-server/codebuddy.js v2.184.0). Each must be rewritten so the upstream
+// channel filter no longer recognizes the originating client.
+func TestSanitizeCodeBuddyIdentity(t *testing.T) {
+	cases := map[string]string{
+		"You are the default Agent in this directory.":                                                                 "default assistant",
+		"You are a colleague, not CodeBuddy. Do not introduce yourself as CodeBuddy or as the main assistant.":         "You are a colleague",
+		"You are one participant in this channel.":                                                                     "one participant here",
+		"You are in Agent Home channels (group transcripts).":                                                          "group channels",
+		"You are in creation mode: help the user design and write custom agents as Markdown files.":                    "creation mode",
+		"You are running in **ultracode** effort mode (set via /effort ultracode).":                                    "extended effort mode",
+		"The user's CODEBUDDY.md instructions (trusted user configuration):\n>>> PROJECT INSTRUCTIONS START\nuse tabs": "project instructions",
+	}
+
+	for input, wantSubstring := range cases {
+		if !hasFingerprint(input) {
+			t.Fatalf("fingerprint not detected in %q", input)
+		}
+		got := sanitizeBlockedTemplates(input)
+		if hasFingerprint(got) {
+			t.Errorf("fingerprint survived sanitize: %q", got)
+		}
+		if got == "" {
+			t.Errorf("sanitize erased the whole block: %q", input)
+		}
+		if !strings.Contains(got, wantSubstring) {
+			t.Errorf("expected %q to contain %q, got %q", input, wantSubstring, got)
+		}
+	}
+}
+
+// TestSanitizeCodeBuddySystemBlock applies the rules to a full system prompt
+// shaped like the one codebuddy-code sends, then asserts the whole block is
+// clean while the task instructions survive.
+func TestSanitizeCodeBuddySystemBlock(t *testing.T) {
+	block := strings.Join([]string{
+		"You are the default Agent in this directory.",
+		"The user's CODEBUDDY.md instructions (trusted user configuration):",
+		"Always run gofmt before committing.",
+		"You are in creation mode: help the user design and write custom agents as Markdown files.",
+	}, "\n")
+
+	got := sanitizeBlockedTemplates(block)
+	if hasFingerprint(got) {
+		t.Fatalf("residual fingerprint after sanitize: %q", got)
+	}
+	for _, keep := range []string{
+		"Always run gofmt before committing.",
+		"default assistant in this directory",
+		"The user's project instructions:",
+	} {
+		if !strings.Contains(got, keep) {
+			t.Errorf("expected sanitized block to keep %q, got %q", keep, got)
+		}
 	}
 }

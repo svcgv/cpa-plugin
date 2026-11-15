@@ -60,7 +60,9 @@ import "C"
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -346,7 +348,7 @@ type registrationCapability struct {
 }
 
 // version is injected at build time via -ldflags "-X main.version=...".
-var version = "0.10.16"
+var version = "0.10.17"
 
 func wbRegistration() registration {
 	return registration{
@@ -565,11 +567,65 @@ func backendHeaders(req *http.Request, sa *storedAuth) {
 	req.Header.Set("X-Conversation-ID", randomHex(16))
 	req.Header.Set("X-Conversation-Request-ID", randomHex(16))
 	req.Header.Set("X-Conversation-Message-ID", randomHex(16))
+	// MaaS source headers. The CodeBuddy upstream only routes a chat request
+	// through a registered channel; omitting x-source-channel-id, or presenting a
+	// channel the account is not approved for, rejects the whole call with
+	// HTTP 400 code 11128 "Illegal API invocation from an unapproved channel".
+	// The values mirror the official @tencent-ai/codebuddy-code CLI bundle.
+	req.Header.Set("X-Source-Channel-Id", maasSourceChannelID)
+	req.Header.Set("X-Source-Model-Type", resolveMaasSourceModelType(sa))
+	req.Header.Set("X-Source-Client-Type", maasSourceClientType)
+	req.Header.Set("X-Source-Enterprise-Id", maasSourceEnterpriseHash(sa))
+	req.Header.Set("X-Inference-Caller", maasInferenceCaller)
 	// Override Origin/Referer for Global accounts so the upstream doesn't
 	// reject the request as cross-origin.
 	origin := originRefererFor(sa)
 	req.Header.Set("Origin", origin)
 	req.Header.Set("Referer", origin+"/")
+}
+
+// MaaS source identifiers, as shipped in @tencent-ai/codebuddy-code
+// (module 9980 of dist-server/codebuddy.js).
+const (
+	maasSourceChannelID  = "workbuddy-enterprise"
+	maasSourceClientType = "CodingCopilot"
+	maasInferenceCaller  = "workbuddy-cpa"
+)
+
+// resolveMaasSourceModelType tells the upstream whether the request targets a
+// model the tenant provisioned itself. Channel routing depends on it, so an
+// enterprise account must not be reported as "builtin".
+func resolveMaasSourceModelType(sa *storedAuth) string {
+	if maasPersonalAccount(sa) {
+		return "builtin"
+	}
+	return "enterprise-custom"
+}
+
+// maasPersonalAccount reports whether the auth belongs to a consumer account.
+// CodeBuddy uses the literal "personal" as the enterprise id of such accounts.
+func maasPersonalAccount(sa *storedAuth) bool {
+	if sa == nil {
+		return true
+	}
+	id := strings.TrimSpace(sa.Account.EnterpriseID)
+	return id == "" || id == "personal"
+}
+
+// maasSourceEnterpriseHash returns the enterprise id expected by the MaaS
+// header. Personal/SaaS accounts send an empty value; enterprise accounts send
+// HMAC-SHA256 keyed by the channel id, hex-encoded.
+func maasSourceEnterpriseHash(sa *storedAuth) string {
+	if sa == nil {
+		return ""
+	}
+	if maasPersonalAccount(sa) {
+		return ""
+	}
+	id := strings.TrimSpace(sa.Account.EnterpriseID)
+	mac := hmac.New(sha256.New, []byte(maasSourceChannelID))
+	mac.Write([]byte(id))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 // randomHex returns n random bytes hex-encoded. CodeBuddy conversation/request
