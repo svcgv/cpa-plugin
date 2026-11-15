@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.16
+
+### Sanitize the top-level system field
+
+- Claude Code and the VSCode extension send instructions in a top-level
+  `system` string/array; only `messages` was scanned, so the billing header
+  and Claude Agent SDK identity line reached CodeBuddy verbatim and still
+  produced 11128 after 0.10.15.
+- Recognize the real `x-anthropic-billing-header:` form so the header is
+  actually stripped.
+
 ## 0.10.15
 
 ### Fix shared fingerprint sanitization
