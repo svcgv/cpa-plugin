@@ -1,0 +1,25 @@
+workbuddy/main.go
+  s_3feb248fe2c024::t_d038a18132ab7d 349
+registry.json
+  s_3feb248fe2c024::t_d038a18132ab7d 9
+workbuddy/CHANGELOG.md
+  s_3feb248fe2c024::t_af49d8caeab319 3-13
+workbuddy/VERSION
+  s_3feb248fe2c024::t_af1b4e2dd22dae 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a5ad28fbfc22df82f881c1003309e2101dc7abe4",
+  "prompts": {},
+  "sessions": {
+    "s_3feb248fe2c024": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dd83-1690-7303-a5d7-59d9ce2cc906",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
