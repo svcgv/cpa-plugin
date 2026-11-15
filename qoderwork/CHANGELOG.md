@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.18
+
+### Preserve host-managed auth priority
+
+- Every existing-account write now starts from the complete physical credential
+  and merges only the fields owned by that operation. Note sync, disable,
+  re-enable, keepalive renewal, session-dead marking, repeated login and import
+  keep `priority` and any other host-managed metadata.
+- A failed or malformed `host.auth.get` aborts an existing-account write instead
+  of replacing the file with a stripped fresh-credential document.
+- `auth.parse` returns the file's priority in both metadata and scheduling
+  attributes; `auth.refresh` preserves the host's current metadata and
+  attributes while renewing only token storage.
+- Numeric and integer-string priorities, including zero and negative values,
+  are covered by host-RPC regression tests.
+
 ## 0.5.14 (2026-11-06)
 
 - Register readable `qoder/` model IDs based on the live model display names,

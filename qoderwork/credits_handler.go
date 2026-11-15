@@ -46,41 +46,14 @@ func handleImportPAT(req pluginapi.ManagementRequest) map[string]any {
 	sa.Auth.Domain = domainForRegion(region)
 
 	name := authFileNameFor(sa)
-	disabled := false
-	var existing map[string]any
-	if files, err := hostAuthList(); err == nil {
-		for _, f := range files {
-			previous, phys, err := hostAuthGetBundle(f.AuthIndex)
-			if err != nil || previous == nil || previous.region() != region || previous.Account.UID != sa.Account.UID {
-				continue
-			}
-			name = f.Name
-			if phys != nil {
-				if phys.Name != "" {
-					name = phys.Name
-				}
-				disabled = phys.Disabled
-				_ = json.Unmarshal(phys.JSON, &existing)
-			}
-			break
-		}
-	}
-	fileJSON, err := buildAuthFileJSON(sa, disabled, displayNote(sa, nil, disabled), nil)
+	bundle, err := prepareImportedPATDocument(sa, region)
 	if err != nil {
 		return map[string]any{"success": false, "error": err.Error()}
 	}
-	if existing != nil {
-		var updated map[string]any
-		if json.Unmarshal(fileJSON, &updated) == nil {
-			for k, v := range updated {
-				existing[k] = v
-			}
-			fileJSON, _ = json.Marshal(existing)
-		}
-	}
+	name = existingAuthFileName(bundle.Physical, name)
 	saveReq := pluginapi.HostAuthSaveRequest{
 		Name: name,
-		JSON: fileJSON,
+		JSON: bundle.JSON,
 	}
 	saveBody, _ := json.Marshal(saveReq)
 	rawResp, err := hostCall(pluginabi.MethodHostAuthSave, saveBody)

@@ -195,13 +195,10 @@ func markSessionDead(authIndex, authID string, sa *storedAuth) error {
 	if phys.Disabled {
 		return nil // already disabled; nothing to do
 	}
-	var doc map[string]any
-	if err := json.Unmarshal(phys.JSON, &doc); err != nil {
-		return err
-	}
-	doc["disabled"] = true
-	doc["note"] = "Session dead (12153): re-login required"
-	raw, err := json.Marshal(doc)
+	raw, err := mergeAuthFileJSON(phys.JSON, nil, map[string]any{
+		"disabled": true,
+		"note":     "Session dead (12153): re-login required",
+	})
 	if err != nil {
 		return err
 	}

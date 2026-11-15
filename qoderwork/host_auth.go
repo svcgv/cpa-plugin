@@ -51,7 +51,8 @@ func hostAuthList() ([]pluginapi.HostAuthFileEntry, error) {
 	out := make([]pluginapi.HostAuthFileEntry, 0, len(resp.Files))
 	prefix := providerName + "-"
 	for _, f := range resp.Files {
-		if strings.HasPrefix(strings.ToLower(f.Name), prefix) {
+		name := strings.ToLower(strings.TrimSpace(f.Name))
+		if name == authFileName || strings.HasPrefix(name, prefix) {
 			out = append(out, f)
 		}
 	}

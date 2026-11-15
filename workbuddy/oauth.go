@@ -447,7 +447,7 @@ func handlePollLogin(raw []byte) ([]byte, error) {
 	loginStates.Delete(state)
 	return okEnvelope(pluginapi.AuthLoginPollResponse{
 		Status: pluginapi.AuthLoginStatusSuccess,
-		Auth:   toAuthDataForLoginPoll(sa),
+		Auth:   toAuthDataForLoginPollWithExistingFile(sa),
 	})
 }
 
@@ -455,6 +455,23 @@ func toAuthDataForLoginPoll(sa *storedAuth) pluginapi.AuthData {
 	ad := toAuthData(sa)
 	ad.ID = ""
 	return ad
+}
+
+// toAuthDataForLoginPollWithExistingFile preserves file-owned state when the
+// host saves the AuthData returned by an OAuth poll. New accounts keep the
+// canonical initializer.
+func toAuthDataForLoginPollWithExistingFile(sa *storedAuth) pluginapi.AuthData {
+	ad := toAuthDataForLoginPoll(sa)
+	if sa == nil {
+		return ad
+	}
+	bundle, err := findExistingOrNewAuthDocument(sa, func(previous *storedAuth) bool {
+		return previous != nil && previous.Account.UID == sa.Account.UID && serviceFor(previous) == serviceFor(sa)
+	})
+	if err != nil || bundle.Physical == nil {
+		return ad
+	}
+	return authDataWithExistingFileState(ad, bundle.Physical, ad.StorageJSON)
 }
 
 func handleRefreshAuth(raw []byte) ([]byte, error) {
@@ -499,7 +516,7 @@ func handleRefreshAuth(raw []byte) ([]byte, error) {
 	// refreshed credential itself after Refresh returns (conductor.go
 	// refreshAuth → m.Update → persist). Writing from the plugin too would
 	// double-write the file.
-	response, err := okEnvelope(pluginapi.AuthRefreshResponse{Auth: toAuthDataForRefresh(sa)})
+	response, err := okEnvelope(pluginapi.AuthRefreshResponse{Auth: toAuthDataForRefresh(sa, req.AuthRefreshRequest)})
 	if err != nil {
 		return nil, err
 	}
@@ -563,9 +580,9 @@ func preserveExpiry(newExpiry, oldExpiry int64) int64 {
 // NEW file, and the old one stays → duplicate auth records.
 //
 // Returning empty FileName = "keep what you had" → no rename, no dup.
-func toAuthDataForRefresh(sa *storedAuth) pluginapi.AuthData {
+func toAuthDataForRefresh(sa *storedAuth, req pluginapi.AuthRefreshRequest) pluginapi.AuthData {
 	ad := toAuthDataOpts(sa, nil, false)
 	ad.FileName = "" // let host backfill original
 	ad.ID = ""       // let host compute from path (prevents ID mismatch dupes)
-	return ad
+	return authDataWithHostState(ad, req)
 }

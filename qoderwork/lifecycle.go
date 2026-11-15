@@ -86,23 +86,10 @@ func disableAuth(authIndex, authID string, sa *storedAuth, cr *creditsSummary, r
 	}
 	// Prefer live physical file to preserve any extra fields if present.
 	phys, err := hostAuthGetPhysical(authIndex)
-	if err == nil && parseDisabledFromAuthJSON(phys.JSON) {
-		// already disabled; still refresh note if needed
-		if lifecycleStateUnchanged(authID, true, note) {
-			return nil
-		}
-	}
-	name := authFileNameFor(sa)
-	path := ""
-	legacyPath := ""
-	if phys != nil {
-		name, path, legacyPath = resolveAuthFileTarget(sa, phys)
-	}
-	raw, err := buildAuthFileJSON(sa, true, note, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("read existing auth file: %w", err)
 	}
-	if err := hostAuthPersistMigrate(name, path, legacyPath, raw); err != nil {
+	if err := patchAuthFileDocument(sa, phys, map[string]any{"disabled": true, "note": note}); err != nil {
 		return err
 	}
 	rememberLifecycleState(authID, true, note)
@@ -124,17 +111,10 @@ func reenableAuth(authIndex, authID string, sa *storedAuth, cr *creditsSummary) 
 		return nil
 	}
 	phys, err := hostAuthGetPhysical(authIndex)
-	name := authFileNameFor(sa)
-	path := ""
-	legacyPath := ""
-	if err == nil {
-		name, path, legacyPath = resolveAuthFileTarget(sa, phys)
-	}
-	raw, err := buildAuthFileJSON(sa, false, note, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("read existing auth file: %w", err)
 	}
-	if err := hostAuthPersistMigrate(name, path, legacyPath, raw); err != nil {
+	if err := patchAuthFileDocument(sa, phys, map[string]any{"disabled": false, "note": note}); err != nil {
 		return err
 	}
 	rememberLifecycleState(authID, false, note)
@@ -171,15 +151,7 @@ func deleteAuth(authIndex, authID string, sa *storedAuth) error {
 	if path == "" {
 		// Last resort: disable instead of silent no-op (never invent a random path).
 		note := displayNote(sa, nil, true) + " · 应删除但无 path"
-		raw, berr := buildAuthFileJSON(sa, true, note, nil)
-		if berr != nil {
-			return fmt.Errorf("no path and build failed: %w", berr)
-		}
-		name := authFileNameFor(sa)
-		if phys.Name != "" && !isLegacyAuthName(phys.Name) {
-			name = phys.Name
-		}
-		if err := hostAuthPersistMigrate(name, "", "", raw); err != nil {
+		if err := patchAuthFileDocument(sa, phys, map[string]any{"disabled": true, "note": note}); err != nil {
 			return err
 		}
 		rememberLifecycleState(authID, true, note)
@@ -249,23 +221,17 @@ func syncAuthNote(authIndex, authID string, sa *storedAuth, cr *creditsSummary, 
 	mu.Lock()
 	defer mu.Unlock()
 	phys, err := hostAuthGetPhysical(authIndex)
-	name := authFileNameFor(sa)
-	path := ""
-	legacyPath := ""
-	if err == nil {
-		name, path, legacyPath = resolveAuthFileTarget(sa, phys)
-		// re-read disabled from disk as source of truth
-		disabled = parseDisabledFromAuthJSON(phys.JSON)
-		note = displayNote(sa, cr, disabled)
+	if err != nil {
+		return fmt.Errorf("read existing auth file: %w", err)
 	}
+	// The physical file is authoritative for disabled; this call only patches
+	// note and disabled while leaving the on-disk credential untouched.
+	disabled = parseDisabledFromAuthJSON(phys.JSON)
+	note = displayNote(sa, cr, disabled)
 	if lifecycleStateUnchanged(authID, disabled, note) {
 		return nil
 	}
-	raw, err := buildAuthFileJSON(sa, disabled, note, nil)
-	if err != nil {
-		return err
-	}
-	if err := hostAuthPersistMigrate(name, path, legacyPath, raw); err != nil {
+	if err := patchAuthFileDocument(sa, phys, map[string]any{"disabled": disabled, "note": note}); err != nil {
 		return err
 	}
 	rememberLifecycleState(authID, disabled, note)

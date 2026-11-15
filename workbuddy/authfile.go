@@ -68,12 +68,15 @@ func persistServiceLoginAuth(sa *storedAuth, service wbService) error {
 	if sa == nil {
 		return fmt.Errorf("nil storedAuth")
 	}
-	raw, err := buildAuthFileJSON(sa, false, displayNote(sa, nil, false), nil)
+	bundle, err := findExistingOrNewAuthDocument(sa, func(previous *storedAuth) bool {
+		return previous != nil && previous.Account.UID == sa.Account.UID && serviceFor(previous) == service
+	})
 	if err != nil {
 		return err
 	}
 	name := authFileNameForService(sa, service)
-	if err := hostAuthPersist(name, "", raw); err != nil {
+	name = existingAuthFileName(bundle.Physical, name)
+	if err := hostAuthPersist(name, "", bundle.JSON); err != nil {
 		return err
 	}
 	// A UID that previously existed under the plain CN name on this service
@@ -250,24 +253,7 @@ func buildAuthFileJSON(sa *storedAuth, disabled bool, note string, extra map[str
 }
 
 func buildRefreshedAuthJSON(physical []byte, sa *storedAuth) ([]byte, error) {
-	if sa == nil {
-		return nil, fmt.Errorf("nil storedAuth")
-	}
-	var doc map[string]json.RawMessage
-	if err := json.Unmarshal(physical, &doc); err != nil {
-		return nil, err
-	}
-	storage, err := json.Marshal(sa)
-	if err != nil {
-		return nil, err
-	}
-	var nested map[string]json.RawMessage
-	if err := json.Unmarshal(storage, &nested); err != nil {
-		return nil, err
-	}
-	doc["auth"] = nested["auth"]
-	doc["account"] = nested["account"]
-	return json.Marshal(doc)
+	return mergeAuthFileJSON(physical, sa, nil)
 }
 
 // parseDisabledFromAuthJSON reads top-level disabled from physical auth JSON.

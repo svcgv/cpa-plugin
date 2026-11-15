@@ -214,6 +214,9 @@ func cliproxyPluginShutdown() {
 // at init. Used to push stream chunks back asynchronously (host.stream.emit /
 // host.stream.close) and to read the host's auth store (host.auth.list/get).
 func hostCall(method string, request []byte) ([]byte, error) {
+	if call := currentHostCallHook(); call != nil {
+		return call(method, request)
+	}
 	if hostAPI == nil || hostAPI.call == nil {
 		return nil, fmt.Errorf("host API unavailable")
 	}
@@ -343,7 +346,7 @@ type registrationCapability struct {
 }
 
 // version is injected at build time via -ldflags "-X main.version=...".
-var version = "0.10.12"
+var version = "0.10.13"
 
 func wbRegistration() registration {
 	return registration{
@@ -627,6 +630,9 @@ func handleParseAuth(raw []byte) ([]byte, error) {
 	// FileName is also echoed back to avoid rename-based duplicates.
 	ad := toAuthDataOpts(sa, nil, false)
 	ad.ID = "" // let host compute from path (prevents ID mismatch dupes)
+	ad.Disabled = parseDisabledFromAuthJSON(req.RawJSON)
+	ad.Metadata["disabled"] = ad.Disabled
+	ad = authDataWithParsedFileState(ad, req.RawJSON)
 	if fn := strings.TrimSpace(req.FileName); fn != "" {
 		ad.FileName = fn
 	}

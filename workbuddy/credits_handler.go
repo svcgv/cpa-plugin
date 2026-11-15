@@ -32,14 +32,15 @@ func handleImportAuth(req pluginapi.ManagementRequest) map[string]any {
 	if err != nil {
 		return map[string]any{"success": false, "error": err.Error()}
 	}
-	// Persist nested storage + top-level type/note/logo/disabled for Auth page.
-	fileJSON, err := buildAuthFileJSON(sa, false, displayNote(sa, nil, false), nil)
+	bundle, err := prepareImportedAuthDocument(sa, serviceFor(sa))
 	if err != nil {
 		return map[string]any{"success": false, "error": err.Error()}
 	}
-	auth := toAuthData(sa)
+	fileJSON := bundle.JSON
+	saveName := authFileNameForService(sa, serviceFor(sa))
+	saveName = existingAuthFileName(bundle.Physical, saveName)
 	saveReq := pluginapi.HostAuthSaveRequest{
-		Name: auth.FileName,
+		Name: saveName,
 		JSON: fileJSON,
 	}
 	saveBody, _ := json.Marshal(saveReq)
@@ -57,6 +58,9 @@ func handleImportAuth(req pluginapi.ManagementRequest) map[string]any {
 	}
 	var saveResp pluginapi.HostAuthSaveResponse
 	_ = json.Unmarshal(env.Result, &saveResp)
+	if bundle.Physical != nil && saveResp.Name == "" {
+		saveResp.Name = strings.TrimSpace(bundle.Physical.Name)
+	}
 	// Remove legacy workbuddy.json if it exists and differs from the saved name.
 	if saveResp.Name != "" && !strings.EqualFold(saveResp.Name, authFileName) {
 		legacyPath := strings.TrimSpace(saveResp.Path)
@@ -76,7 +80,7 @@ func handleImportAuth(req pluginapi.ManagementRequest) map[string]any {
 		"path":     saveResp.Path,
 		"uid":      sa.Account.UID,
 		"nickname": sa.Account.Nickname,
-		"file":     auth.FileName,
+		"file":     saveName,
 	}
 }
 

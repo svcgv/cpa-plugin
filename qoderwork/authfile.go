@@ -290,12 +290,23 @@ func deleteAuthFileInDir(path, dir string) error {
 // Success is what makes a panel login report "success", so a failure here must
 // surface to the caller rather than leave a session that claims to be done.
 func persistPanelAuth(sa *storedAuth) error {
+	return savePanelAuthWithName(sa, authFileNameFor(sa))
+}
+
+func savePanelAuthWithName(sa *storedAuth, name string) error {
 	if sa == nil {
 		return fmt.Errorf("nil storedAuth")
 	}
-	raw, err := buildAuthFileJSON(sa, false, displayNote(sa, nil, false), nil)
+	bundle, err := findExistingOrNewAuthDocument(sa, func(previous *storedAuth) bool {
+		return previous != nil && previous.Account.UID == sa.Account.UID && previous.region() == sa.region()
+	})
 	if err != nil {
 		return err
 	}
-	return hostAuthPersist(authFileNameFor(sa), "", raw)
+	name = existingAuthFileName(bundle.Physical, name)
+	return hostAuthPersist(name, "", bundle.JSON)
+}
+
+func buildRefreshedAuthJSON(physical []byte, sa *storedAuth) ([]byte, error) {
+	return mergeAuthFileJSON(physical, sa, nil)
 }

@@ -179,16 +179,9 @@ func persistAuthTokens(authIndex string, sa *storedAuth) error {
 	if name == "" {
 		name = authFileNameFor(sa)
 	}
-	// Carry over the note currently on disk (lifecycle writes credit/status
-	// notes there; dropping it would regress the panel display).
-	note := ""
-	var doc map[string]any
-	if err := json.Unmarshal(phys.JSON, &doc); err == nil {
-		if s, ok := doc["note"].(string); ok {
-			note = s
-		}
-	}
-	raw, err := buildAuthFileJSON(sa, phys.Disabled, note, nil)
+	// mergeAuthFileJSON keeps note/priority and all other host-managed fields
+	// intact while replacing only the refreshed nested auth/account data.
+	raw, err := mergeAuthFileJSON(phys.JSON, sa, nil)
 	if err != nil {
 		return err
 	}
@@ -207,13 +200,10 @@ func markSessionDead(authIndex, authID string, sa *storedAuth) error {
 	if phys.Disabled {
 		return nil // already disabled; nothing to do
 	}
-	var doc map[string]any
-	if err := json.Unmarshal(phys.JSON, &doc); err != nil {
-		return err
-	}
-	doc["disabled"] = true
-	doc["note"] = "Session dead (TOKEN_EXPIRE): re-login required"
-	raw, err := json.Marshal(doc)
+	raw, err := mergeAuthFileJSON(phys.JSON, nil, map[string]any{
+		"disabled": true,
+		"note":     "Session dead (TOKEN_EXPIRE): re-login required",
+	})
 	if err != nil {
 		return err
 	}

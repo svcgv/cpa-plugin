@@ -435,7 +435,7 @@ func handlePollLogin(raw []byte) ([]byte, error) {
 		loginStates.Delete(state)
 		return okEnvelope(pluginapi.AuthLoginPollResponse{
 			Status: pluginapi.AuthLoginStatusSuccess,
-			Auth:   toAuthData(sa),
+			Auth:   toAuthDataForLoginPoll(sa, region),
 		})
 	}
 
@@ -449,7 +449,7 @@ func handlePollLogin(raw []byte) ([]byte, error) {
 					loginStates.Delete(state)
 					return okEnvelope(pluginapi.AuthLoginPollResponse{
 						Status: pluginapi.AuthLoginStatusSuccess,
-						Auth:   toAuthData(sa),
+						Auth:   toAuthDataForLoginPoll(sa, sa.region()),
 					})
 				}
 			}
@@ -460,6 +460,24 @@ func handlePollLogin(raw []byte) ([]byte, error) {
 		Status:  pluginapi.AuthLoginStatusPending,
 		Message: "请在管理面板导入 PAT",
 	})
+}
+
+// toAuthDataForLoginPoll merges newly authorized credentials into an existing
+// physical document so a repeated host-driven login keeps priority and other
+// host-managed fields. New accounts use the standard initializer.
+func toAuthDataForLoginPoll(sa *storedAuth, region qoderRegion) pluginapi.AuthData {
+	ad := toAuthData(sa)
+	ad.ID = ""
+	if sa == nil {
+		return ad
+	}
+	bundle, err := findExistingOrNewAuthDocument(sa, func(previous *storedAuth) bool {
+		return previous != nil && previous.Account.UID == sa.Account.UID && previous.region() == region
+	})
+	if err != nil || bundle.Physical == nil {
+		return ad
+	}
+	return authDataWithExistingFileState(ad, bundle.Physical, ad.StorageJSON)
 }
 
 // deviceExpiryUnix resolves the access-token expiry from a deviceToken
@@ -613,7 +631,7 @@ func handleRefreshAuth(raw []byte) ([]byte, error) {
 	// Host persists the refreshed credential itself after Refresh returns
 	// (conductor.go refreshAuth → m.Update → persist). Writing from the
 	// plugin too would double-write the file.
-	return okEnvelope(pluginapi.AuthRefreshResponse{Auth: toAuthDataForRefresh(sa)})
+	return okEnvelope(pluginapi.AuthRefreshResponse{Auth: toAuthDataForRefresh(sa, req)})
 }
 
 // preserveExpiry reuses the previous token's expiresAt when the refresh
@@ -629,9 +647,9 @@ func preserveExpiry(newExpiry, oldExpiry int64) int64 {
 // toAuthDataForRefresh mirrors the workbuddy helper: blank out FileName and
 // ID so the host backfills from the original auth path (prevents ID mismatch
 // duplicate files when Refresh round-trips the record).
-func toAuthDataForRefresh(sa *storedAuth) pluginapi.AuthData {
+func toAuthDataForRefresh(sa *storedAuth, req pluginapi.AuthRefreshRequest) pluginapi.AuthData {
 	ad := toAuthDataOpts(sa, nil, false)
 	ad.FileName = "" // let host backfill original
 	ad.ID = ""       // let host compute from path (prevents ID mismatch dupes)
-	return ad
+	return authDataWithHostState(ad, req)
 }
