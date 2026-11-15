@@ -1,0 +1,73 @@
+workbuddy/main.go
+  s_60438bb203ff31::t_f4f82b1b31ae17 351
+  s_60438bb203ff31::t_045782caf4f117 599-600,602,605-614,622,625,629
+  s_60438bb203ff31::t_844e98ffd72b96 63,65,570-579,587-598,601,603-604,615-621,623-624,626-628
+  s_60438bb203ff31::t_47952eb20dcefb 630
+workbuddy/sanitize_test.go
+  s_60438bb203ff31::t_e8dbfedec138e8 64,115
+  s_60438bb203ff31::t_a53540ebf2776e 44
+  s_60438bb203ff31::t_e0f0e6817fcdbd 143-150,152-200
+  s_60438bb203ff31::t_5b08f5f7ddb5fe 19,24,29,34,39,49,54,59
+  s_60438bb203ff31::t_169f5f62c4171e 67,69
+  s_60438bb203ff31::t_65b3d793396c34 151
+shared/contextrules/contextrules.go
+  s_60438bb203ff31::t_7db9fb0f1979eb 66,68-70,86-87
+  s_60438bb203ff31::t_c43e79872bd012 25,28-31,91,98-101
+  s_60438bb203ff31::t_5a62e0854b8726 94-96
+  s_60438bb203ff31::t_7a440d0c206b52 129
+  s_60438bb203ff31::t_f55883a4f0e115 41
+  s_60438bb203ff31::t_a532a1d50992a7 22,32-34
+  s_60438bb203ff31::t_11949bbc21fb22 82
+  s_60438bb203ff31::t_0cf5b2abb9c921 81
+  s_60438bb203ff31::t_2581f3ad98f976 26
+  s_60438bb203ff31::t_163e2a3262e198 92,102-103
+  s_60438bb203ff31::t_f3010f2c304fad 72-79,84-85,89-90
+  s_60438bb203ff31::t_0a5d09d49819f6 27
+  s_60438bb203ff31::t_7fbf105019e694 67
+  s_60438bb203ff31::t_b1bd881ed51129 106-108
+  s_60438bb203ff31::t_cd4a2a05c8a1b7 71,80,83,88,104-105,109-125
+  s_60438bb203ff31::t_37fbca5fa64cee 35-40
+  s_60438bb203ff31::t_c06e1ead8cc192 97
+  s_60438bb203ff31::t_cf9874255dc8ba 93
+registry.json
+  s_60438bb203ff31::t_f4f82b1b31ae17 9
+shared/contextrules/contextrules_test.go
+  s_60438bb203ff31::t_16f67b7aac2124 30,35,40,60,65,75
+  s_60438bb203ff31::t_e6df5bcac74815 121
+  s_60438bb203ff31::t_c032bc22a7993c 6
+  s_60438bb203ff31::t_030885e8fd82c0 20,25,50,85
+  s_60438bb203ff31::t_a53540ebf2776e 55
+  s_60438bb203ff31::t_0efdca4fe43932 215-220,230-231,233,236-243
+  s_60438bb203ff31::t_c90387506de6cf 70
+  s_60438bb203ff31::t_33f2985a41c003 45
+  s_60438bb203ff31::t_3277d66f92bd2a 90
+  s_60438bb203ff31::t_6a1420eece3f23 232
+  s_60438bb203ff31::t_a26920032aed90 123-126,129-137
+  s_60438bb203ff31::t_00d64a5fd49716 214,221-229,234-235,244-246
+workbuddy/backend_headers_test.go
+  s_60438bb203ff31::t_eac1924254153a 4-6,58-103
+  s_60438bb203ff31::t_0087e09a84c671 104
+workbuddy/zz_e2e_test.go
+  s_60438bb203ff31::t_8a76722b04bbcc 4,11,13-21
+  s_60438bb203ff31::t_13a26dfc93f4e9 1-3,5-10,12,22
+workbuddy/CHANGELOG.md
+  s_60438bb203ff31::t_9132564478cfb3 3-25
+workbuddy/VERSION
+  s_60438bb203ff31::t_60d7580b62909e 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "800a3e21739b0b8c17a1243af196fd6cb6fe6aa4",
+  "prompts": {},
+  "sessions": {
+    "s_60438bb203ff31": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1def6-c043-73e3-b7c0-de6b738984a2",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
