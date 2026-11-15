@@ -598,6 +598,18 @@ func handleRefreshAuth(raw []byte) ([]byte, error) {
 		return nil, fmt.Errorf("refresh: %w", err)
 	}
 
+	if strings.HasPrefix(sa.Auth.RefreshToken, "drt-") {
+		deviceTok, deviceErr := refreshDeviceTokenAt(sa.endpoints().OpenAPI, sa.Auth.RefreshToken)
+		if deviceErr != nil {
+			return nil, fmt.Errorf("refresh rejected: %w — 设备凭证刷新失败", deviceErr)
+		}
+		sa.Auth.AccessToken = deviceTok.accessToken()
+		sa.Auth.RefreshToken = deviceTok.RefreshToken
+		sa.Auth.ExpiresAt = deviceExpiryUnix(deviceTok)
+		invalidateCosySession(sa.Account.UID)
+		return okEnvelope(pluginapi.AuthRefreshResponse{Auth: toAuthDataForRefresh(sa, req)})
+	}
+
 	if !strings.HasPrefix(sa.Auth.PersonalToken, "pt-") {
 		return nil, fmt.Errorf("需要补充该区域的 PAT；原账号记录已保留")
 	}

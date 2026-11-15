@@ -233,6 +233,10 @@ func fetchDynamicModels() []pluginapi.ModelInfo {
 		if sa.region() == regionIntl {
 			sawIntl = true
 		}
+		if !strings.HasPrefix(sa.Auth.PersonalToken, "pt-") && !hasUsableDeviceCredential(sa) {
+			lastErr = fmt.Errorf("credential family unsupported for catalog: %s", f.Name)
+			continue
+		}
 		dyn, err := callModelsForAuth(sa)
 		if err != nil {
 			attempts = append(attempts, f.Name+": "+truncateRedacted(err.Error(), 180))
@@ -317,7 +321,7 @@ func unionModels(a, b []pluginapi.ModelInfo) []pluginapi.ModelInfo {
 
 func fetchDynamicModelsFromStorage(storageJSON []byte) []pluginapi.ModelInfo {
 	sa, err := parseStored(storageJSON)
-	if err != nil || sa == nil || !strings.HasPrefix(sa.Auth.PersonalToken, "pt-") {
+	if err != nil || sa == nil || (!strings.HasPrefix(sa.Auth.PersonalToken, "pt-") && !hasUsableDeviceCredential(sa)) {
 		return nil
 	}
 	owner := modelCacheIdentity(sa)
@@ -1038,6 +1042,7 @@ func handleModelStatic(raw []byte) ([]byte, error) {
 	}
 	cacheModelAliases(req.Host)
 	var models []pluginapi.ModelInfo
+	includeFallback := true
 	files, _ := hostAuthListFiles()
 	for _, f := range files {
 		if f.Disabled {
@@ -1048,9 +1053,14 @@ func handleModelStatic(raw []byte) ([]byte, error) {
 		}
 		storage, err := hostAuthGetByIndex(f.AuthIndex)
 		if err != nil {
+			includeFallback = false
 			continue
 		}
+		includeFallback = false
 		models = unionModels(models, publicModelCatalog(fetchDynamicModelsFromStorage(storage)))
+	}
+	if includeFallback {
+		models = unionModels(models, publicModelCatalog(wbModels()))
 	}
 	models = filterExcludedModels(models, req.Host)
 	return okEnvelope(pluginapi.ModelResponse{Provider: providerName, Models: models})
@@ -1068,5 +1078,8 @@ func handleModelForAuth(raw []byte) ([]byte, error) {
 	cacheModelAliases(req.Host)
 	models := publicModelCatalog(fetchDynamicModelsFromStorage(req.StorageJSON))
 	models = filterExcludedModels(models, req.Host)
+	// Do not include AuthUpdate here: returning a refreshed credential during
+	// model discovery races the host's auth-file watcher and can discard the
+	// freshly registered model set as a stale publication.
 	return okEnvelope(pluginapi.ModelResponse{Provider: providerName, Models: models})
 }

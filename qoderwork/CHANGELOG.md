@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.22
+
+### Fix local Qoder routing for device-grant credentials
+
+- Register the static catalog with a `Both` executor scope so CPA can discover
+  Qoder models even when a per-auth registration loses its startup race.
+- Accept unexpired `dt-`/`drt-` device credentials for COSY catalog discovery
+  and chat without requiring a PAT. PAT-backed accounts keep the existing
+  jobToken exchange path.
+- Refresh `drt-` credentials through Qoder's deviceToken endpoint; do not
+  overwrite them with jobToken credentials.
+- Keep `model.for_auth` read-only so model discovery does not race the host's
+  auth-file watcher. Add regression tests for device credential routing,
+  static model publication, and device-token refresh.
+
 ## 0.5.21
 
 ### Qoder CLI 1.1.89 wire compatibility

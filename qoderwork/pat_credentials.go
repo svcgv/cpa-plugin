@@ -14,6 +14,9 @@ var patCredentialLocks sync.Map
 var patCredentialCache sync.Map
 
 func forcePATCredential(sa *storedAuth) error {
+	if hasUsableDeviceCredential(sa) {
+		return nil
+	}
 	if sa == nil || !strings.HasPrefix(sa.Auth.PersonalToken, "pt-") {
 		return fmt.Errorf("账号需要 PAT")
 	}
@@ -37,6 +40,13 @@ type cachedPATCredential struct {
 }
 
 func preparePATCredential(sa *storedAuth) error {
+	// Device-grant credentials (dt-/drt-) are already usable for COSY-signed
+	// catalog and chat calls. They must not be replaced by a jobToken just
+	// because the long-lived PAT is absent; the device flow has its own
+	// refresh endpoint.
+	if hasUsableDeviceCredential(sa) {
+		return nil
+	}
 	if sa == nil || !strings.HasPrefix(sa.Auth.PersonalToken, "pt-") {
 		return fmt.Errorf("账号需要补充对应区域的 PAT")
 	}
@@ -56,6 +66,15 @@ func preparePATCredential(sa *storedAuth) error {
 		}
 	}
 	return exchangePATCredentialLocked(sa, key)
+}
+
+func hasUsableDeviceCredential(sa *storedAuth) bool {
+	if sa == nil {
+		return false
+	}
+	return strings.HasPrefix(sa.Auth.AccessToken, "dt-") &&
+		strings.HasPrefix(sa.Auth.RefreshToken, "drt-") &&
+		(sa.Auth.ExpiresAt == 0 || sa.Auth.ExpiresAt > time.Now().Unix())
 }
 
 func exchangePATCredentialLocked(sa *storedAuth, key string) error {

@@ -8,7 +8,7 @@ CLIProxyAPI 的 QoderWork provider，支持国内版和国际版 PAT 账号、�
 2. 打开插件面板 `/v0/resource/plugins/qoderwork/panel`，选择「PAT 登录」和对应区域，粘贴 PAT 并导入。
 3. 插件校验 PAT、账号身份后保存到 CPA 凭证库。两区域凭证互不通用；国际版凭证文件名带 `intl` 前缀。
 
-旧设备授权账号的记录会保留；缺少 PAT 的账号需要导入对应区域的 PAT。插件通过该区域的 jobToken 接口刷新凭证。请勿将 PAT 或凭证文件提交到仓库。
+已保存的设备授权账号（`dt-`/`drt-`）继续使用 Qoder 的 deviceToken 刷新接口和 COSY 签名目录/对话；PAT 账号则通过该区域的 jobToken 接口刷新。两种凭证都可用于模型发现与聊天。请勿将 PAT 或凭证文件提交到仓库。
 
 ## 客户端兼容与请求线缆
 

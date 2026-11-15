@@ -337,7 +337,7 @@ type registrationCapability struct {
 }
 
 // version is injected at build time via -ldflags "-X main.version=...".
-var version = "0.5.21"
+var version = "0.5.22"
 
 func wbRegistration() registration {
 	return registration{
@@ -368,11 +368,15 @@ func wbRegistration() registration {
 			},
 		},
 		Capabilities: registrationCapability{
-			ModelProvider:         true,
-			AuthProvider:          true,
-			FrontendAuthProvider:  false,
-			Executor:              true,
-			ExecutorModelScope:    pluginapi.ExecutorModelScopeOAuth,
+			ModelProvider:        true,
+			AuthProvider:         true,
+			FrontendAuthProvider: false,
+			Executor:             true,
+			// Advertise the static catalog even when this plugin owns the
+			// executor. CPA skips model.static for OAuth-only executor scopes;
+			// Qoder credentials are file-backed and need the fallback catalog
+			// registered before per-auth discovery can route a request.
+			ExecutorModelScope:    pluginapi.ExecutorModelScopeBoth,
 			ExecutorInputFormats:  []string{"chat-completions"},
 			ExecutorOutputFormats: []string{"chat-completions"},
 			ManagementAPI:         true,

@@ -11,7 +11,7 @@ import (
 
 // Saved catalogs contain no credentials; account identities are hashed.
 func catalogCachePath(sa *storedAuth) string {
-	if sa == nil || sa.Auth.PersonalToken == "" {
+	if sa == nil || (sa.Auth.PersonalToken == "" && !hasUsableDeviceCredential(sa)) {
 		return ""
 	}
 	dir := os.Getenv("QODERWORK_CACHE_DIR")
