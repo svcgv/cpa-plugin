@@ -44,7 +44,7 @@ var Fingerprints = []string{
 //
 // It must start the text (after optional whitespace); unrelated "cch=" text in
 // user content is left untouched.
-var billingHeaderRE = regexp.MustCompile(`^[ \t\n]*cch=[0-9a-f]{5};cc_[^\n]*`)
+var billingHeaderRE = regexp.MustCompile(`^[ \t\n]*(?:x-anthropic-billing-header:[^\n]*|cch=[0-9a-f]{5};cc_[^\n]*)`)
 
 // Sanitize removes harness fingerprints from one block of text. Every
 // ReplaceAll source is literal text a harness injects; the target is a

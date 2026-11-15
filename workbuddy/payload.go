@@ -123,18 +123,35 @@ func normalizeToolsInPlace(obj map[string]any) bool {
 }
 
 // rewriteSystemInPlace is the in-place form of rewriteSystemForUpstream.
+//
+// It sanitizes BOTH conversation messages and the top-level "system" field.
+// Anthropic-protocol clients (Claude Code, the VSCode extension) send their
+// instructions as a separate "system" value - a string or an array of text
+// blocks whose first entry is the x-anthropic-billing-header. Scanning only
+// "messages" let those fingerprints reach the upstream verbatim, which is what
+// produced 11128 for Claude Code even after the message-level fix.
 func rewriteSystemInPlace(obj map[string]any) bool {
-	messages, _ := obj["messages"].([]any)
 	changed := false
-	for _, m := range messages {
-		msg, ok := m.(map[string]any)
-		if !ok {
-			continue
+
+	if messages, ok := obj["messages"].([]any); ok {
+		for _, m := range messages {
+			msg, okMsg := m.(map[string]any)
+			if !okMsg {
+				continue
+			}
+			if rewriteContentField(msg) {
+				changed = true
+			}
 		}
-		if rewriteContentField(msg) {
+	}
+
+	if system, okSystem := obj["system"]; okSystem {
+		if updated, systemChanged := sanitizeSystemPayload(system); systemChanged {
+			obj["system"] = updated
 			changed = true
 		}
 	}
+
 	return changed
 }
 
@@ -467,4 +484,35 @@ func isEmptyValue(v any) bool {
 		return true
 	}
 	return false
+}
+
+// sanitizeSystemPayload sanitizes a top-level "system" value that reaches the
+// plugin before any OpenAI-shape conversion: a plain string or an array of
+// {type,text} text blocks (the Anthropic shape Claude Code sends). Returns the
+// possibly-updated value and whether it changed.
+func sanitizeSystemPayload(system any) (any, bool) {
+	switch v := system.(type) {
+	case string:
+		if s := sanitizeBlockedTemplates(v); s != v {
+			return s, true
+		}
+	case []any:
+		changed := false
+		for _, block := range v {
+			part, ok := block.(map[string]any)
+			if !ok {
+				continue
+			}
+			text, okText := part["text"].(string)
+			if !okText {
+				continue
+			}
+			if s := sanitizeBlockedTemplates(text); s != text {
+				part["text"] = s
+				changed = true
+			}
+		}
+		return v, changed
+	}
+	return system, false
 }
