@@ -21,3 +21,12 @@ qorder
 # Local PATs used for integration testing
 /pat.txt
 /qoderwork/pat.txt
+
+# Local zig cross-compiler toolchain used by tools/build-linux.sh (large; fetch
+# with `tools/build-linux.sh --fetch`). Not committed.
+tools/zig/
+tools/zigcc
+tools/zigcxx
+
+# stray object files emitted by the zig cc wrapper
+*.o
