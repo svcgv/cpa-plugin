@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.14
+
+### Extend blocked-template sanitization
+
+- Detect and rewrite additional Codex CLI / Claude Code prompt fingerprints before forwarding to CodeBuddy.
+- Remove Anthropic billing headers and `cc_*` key-value markers that can trigger upstream 11128 responses.
+
 ## 0.10.13
 
 ### Preserve host-managed auth priority

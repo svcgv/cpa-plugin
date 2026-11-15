@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.19
+
+### Sanitize blocked upstream prompt fingerprints
+
+- Apply message sanitization to Qoder chat bodies for string and multipart text content.
+- Detect Codex CLI / Claude Code prompts, remove Anthropic billing headers and `cc_*` key-value markers, and rewrite known blocked templates.
+
 ## 0.5.18
 
 ### Preserve host-managed auth priority
