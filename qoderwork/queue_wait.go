@@ -236,6 +236,12 @@ func queryQoderQueue(ctx context.Context, sa *storedAuth, requestSetID, requestI
 		return qoderQueueStatus{}, err
 	}
 	req.Header.Set("Cosy-Sigpath", signaturePath)
+	headerModel := model
+	if entry, ok := metadataForModel(sa, model); ok && strings.TrimSpace(entry.DisplayName) != "" {
+		headerModel = strings.TrimSpace(entry.DisplayName)
+	}
+	req.Header.Set("X-Qoder-Model", headerModel)
+	req.Header.Set("X-RequestSet-ID", requestSetID)
 	if requestID != "" {
 		req.Header.Set("X-Request-Id", requestID)
 	}

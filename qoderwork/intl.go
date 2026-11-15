@@ -36,7 +36,7 @@ const (
 
 	// intlCosyVersion is the client version presented in Cosy-Version headers.
 	// It must match an official client build the gateway recognises.
-	intlCosyVersion = "1.0.0"
+	intlCosyVersion = qoderCLIWireVersion
 
 	intlDefaultContext = 200000
 	intlDefaultMaxOut  = 32000

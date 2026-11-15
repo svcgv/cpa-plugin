@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.5.21
+
+### Qoder CLI 1.1.89 wire compatibility
+
+- Rebuild `agent_chat_generation` from the current official CLI fields instead of
+  the captured `baseprompt.json` template. The request now uses
+  `chat_task=FREE_INPUT`, `version=3`, CLI model/parameter fields, string
+  `chat_context.originalContent`, and no legacy `chat_prompt`,
+  `code_language`, or `image_urls` fields.
+- Match CLI routing identity with `X-Qoder-Model`, `X-Session-ID`,
+  `X-RequestSet-ID`, `Cosy-Version=1.1.89`, `Cosy-MachineHostname`, and the
+  `qoder/1.1.89` user agent.
+- Normalize OpenAI, Responses, Anthropic content blocks and DeepSeek Harness
+  developer/tool history into one upstream message schema.
+- Preserve tool calls/results, reasoning text, image parts, sampling fields,
+  `enable_thinking`, `preserve_thinking`, and model context length.
+
+### CLI-compatible context compaction
+
+- Enable automatic compaction at the CLI 1.1.89 threshold: output reservation
+  capped at 20k, then `max(13k, 5% of message budget)` headroom.
+- Replay the system prompt, tools and historical prefix into a one-shot
+  `agent_summary` request with `tool_choice=none`, extract the
+  `<summary>` block, and replace the covered prefix with a checkpoint while
+  retaining the current user turn.
+- Add a bounded 45-minute per-session prefix cache, per-session serialization,
+  fail-open behavior, aggregate status counters, and configuration for trigger
+  percentage, summary model and summary output cap.
+- A PAT-backed live probe verified token exchange, identity, model discovery and
+  request admission for the new wire shape; the tested CN models were queued
+  with `retry_after=60s`, so a completed live chat remains capacity-dependent.
+
 ## 0.5.20
 
 ### Fix shared fingerprint sanitization

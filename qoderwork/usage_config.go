@@ -67,6 +67,9 @@ func configure(raw []byte) {
 	nextLifecycleAuto := true
 	nextSchedulerMode := schedulerModeOff
 	nextKeepaliveAuto := true
+	nextCompaction := true
+	nextCompactionPercent, nextCompactionMaxTokens := 0, defaultCompactionMaxTokens
+	nextCompactionModel := ""
 	nextMgmtKey := ""
 	cfgURL, cfgKey := "", ""
 	var configYAML []byte
@@ -93,7 +96,8 @@ func configure(raw []byte) {
 				// silently replaced with a default (which could re-enable
 				// automatic collection after a bad panel save).
 				switch key {
-				case "checkin_auto", "lifecycle_auto", "token_keepalive", "scheduler_mode", "usage_report_url", "usage_report_key", "management_key", "queue_wait", "queue_wait_seconds":
+				case "checkin_auto", "lifecycle_auto", "token_keepalive", "scheduler_mode", "usage_report_url", "usage_report_key", "management_key", "queue_wait", "queue_wait_seconds",
+					"context_compaction", "context_compaction_pct", "context_compaction_max_tokens", "context_compaction_model":
 					return
 				}
 				continue
@@ -106,6 +110,22 @@ func configure(raw []byte) {
 				nextLifecycleAuto = qoderConfigEnabled(v)
 			case "token_keepalive":
 				nextKeepaliveAuto = qoderConfigEnabled(v)
+			case "context_compaction":
+				nextCompaction = qoderConfigEnabled(v)
+			case "context_compaction_pct":
+				percent, err := strconv.Atoi(v)
+				if err != nil || percent < 0 || percent > 100 {
+					return
+				}
+				nextCompactionPercent = percent
+			case "context_compaction_max_tokens":
+				tokens, err := strconv.Atoi(v)
+				if err != nil || tokens < 1 || tokens > 1_000_000 {
+					return
+				}
+				nextCompactionMaxTokens = tokens
+			case "context_compaction_model":
+				nextCompactionModel = strings.TrimSpace(value.Value)
 			case "scheduler_mode":
 				if v == schedulerModeCredits {
 					nextSchedulerMode = schedulerModeCredits
@@ -138,6 +158,7 @@ func configure(raw []byte) {
 	setRewardConfig(rewardCfg)
 	setContextWindows(nextCNMaxContext, nextIntlMaxContext)
 	setQueueSettings(nextQueueWait, nextQueueSeconds)
+	setCompactionSettings(nextCompaction, nextCompactionPercent, nextCompactionMaxTokens, nextCompactionModel)
 
 	checkinAutoMu.Lock()
 	checkinAuto = nextCheckinAuto

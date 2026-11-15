@@ -224,7 +224,11 @@ func handleManagement(raw []byte) ([]byte, error) {
 		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleModelsStatus()))
 	case req.Method == http.MethodGet && path == base+"/models/context":
 		queue := currentQueueSettings()
-		return okEnvelope(mgmtJSONResponse(http.StatusOK, map[string]any{"cn_max_context": useMaxContext(regionCN), "intl_max_context": useMaxContext(regionIntl), "queue_wait": queue.enabled, "queue_wait_seconds": int(queue.budget / time.Second), "queue_progress": queueProgressSnapshot()}))
+		return okEnvelope(mgmtJSONResponse(http.StatusOK, map[string]any{
+			"cn_max_context": useMaxContext(regionCN), "intl_max_context": useMaxContext(regionIntl),
+			"queue_wait": queue.enabled, "queue_wait_seconds": int(queue.budget / time.Second),
+			"queue_progress": queueProgressSnapshot(), "context_compaction": compactionStatus(),
+		}))
 	case req.Method == http.MethodPost && path == base+"/models/refresh":
 		return okEnvelope(mgmtJSONResponse(http.StatusOK, handleModelsRefresh()))
 	}

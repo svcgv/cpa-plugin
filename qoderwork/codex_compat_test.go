@@ -31,6 +31,7 @@ func TestLiveCatalogReasoningHints(t *testing.T) {
 		t.Fatalf("catalog failed: %v", err)
 	}
 	for _, m := range models {
+		t.Logf("id=%s name=%s", m.ID, m.Name)
 		hint, ok := metadataForModel(sa, m.ID)
 		if !ok {
 			continue
@@ -91,12 +92,11 @@ func TestReferenceQueueIdentityAndContextConfiguration(t *testing.T) {
 			ID string `json:"id"`
 		} `json:"business"`
 		Parameters struct {
-			MaxTokens int `json:"max_tokens"`
+			MaxTokens     int   `json:"max_tokens"`
+			ContextLength int64 `json:"context_length"`
 		} `json:"parameters"`
 		ModelConfig struct {
-			ContextConfig map[string]struct {
-				IsDefault bool `json:"is_default"`
-			} `json:"context_config"`
+			MaxInputTokens int64 `json:"max_input_tokens"`
 		} `json:"model_config"`
 	}
 	if err = json.Unmarshal(encoded, &body); err != nil {
@@ -108,8 +108,8 @@ func TestReferenceQueueIdentityAndContextConfiguration(t *testing.T) {
 	if body.Parameters.MaxTokens != 32768 {
 		t.Fatalf("declared output limit ignored: %d", body.Parameters.MaxTokens)
 	}
-	if !body.ModelConfig.ContextConfig["small"].IsDefault || body.ModelConfig.ContextConfig["large"].IsDefault {
-		t.Fatal("provider context defaults were rewritten")
+	if body.Parameters.ContextLength != 1_000_000 || body.ModelConfig.MaxInputTokens != 1_000_000 {
+		t.Fatalf("effective context not encoded in CLI fields: %#v", body)
 	}
 }
 

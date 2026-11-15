@@ -71,3 +71,40 @@ test('model prices show upstream promotion and escape text', () => {
   assert.match(html,/0.05×/); assert.match(html,/<td>0.5×<\/td>/); assert.match(html,/当前未生效/);
   assert.match(html,/22:00–08:00 Asia\/Shanghai/); assert.match(html,/&lt;discount&gt;/); assert.match(html,/未提供/);
 });
+
+test('context compaction settings load and save', async () => {
+  const { context, elements } = loadPanel('cn');
+  const runtime = {
+    cn_max_context: true, intl_max_context: false, queue_wait: true, queue_wait_seconds: 540,
+    context_compaction: {
+      enabled: true, percent_override: 75, max_tokens: 4096, summary_model: 'qmodel',
+      successes: 2, cache_hits: 3, failures: 1, tokens_saved: 9000,
+    },
+  };
+  context.api = async route => route === '/models/context' ? runtime : { status: { source: 'dynamic' }, accounts: [] };
+  await context.loadContextSettings();
+  assert.equal(elements.get('contextCompaction').checked, true);
+  assert.equal(elements.get('contextCompactionPct').value, '75');
+  assert.equal(elements.get('contextCompactionMaxTokens').value, '4096');
+  assert.equal(elements.get('contextCompactionModel').value, 'qmodel');
+  assert.match(elements.get('compactionStatus').textContent, /缓存命中 3/);
+
+  let saved = null;
+  context.fetch = async (_url, options) => {
+    saved = JSON.parse(options.body);
+    runtime.context_compaction = {
+      enabled: saved.context_compaction, percent_override: saved.context_compaction_pct,
+      max_tokens: saved.context_compaction_max_tokens, summary_model: saved.context_compaction_model,
+    };
+    return { ok: true, status: 200 };
+  };
+  elements.get('contextCompaction').checked = false;
+  elements.get('contextCompactionPct').value = '60';
+  elements.get('contextCompactionMaxTokens').value = '2048';
+  elements.get('contextCompactionModel').value = 'dfmodel';
+  await context.saveContextSettings();
+  assert.equal(saved.context_compaction, false);
+  assert.equal(saved.context_compaction_pct, 60);
+  assert.equal(saved.context_compaction_max_tokens, 2048);
+  assert.equal(saved.context_compaction_model, 'dfmodel');
+});

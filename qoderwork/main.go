@@ -337,7 +337,7 @@ type registrationCapability struct {
 }
 
 // version is injected at build time via -ldflags "-X main.version=...".
-var version = "0.5.20"
+var version = "0.5.21"
 
 func wbRegistration() registration {
 	return registration{
@@ -353,6 +353,10 @@ func wbRegistration() registration {
 				{Name: "queue_wait_seconds", Type: pluginapi.ConfigFieldTypeInteger, Description: "Maximum Qoder queue waiting time per request in seconds (default 540)."},
 				{Name: "cn_max_context", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Use the largest declared CN model context (default true)."},
 				{Name: "intl_max_context", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Use the largest declared international model context (default true)."},
+				{Name: "context_compaction", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Enable CLI-compatible automatic context compaction before a request exceeds the model's effective context budget (default true)."},
+				{Name: "context_compaction_pct", Type: pluginapi.ConfigFieldTypeInteger, Description: "Optional auto-compaction threshold as a percentage of message budget after output reservation. 0 uses Qoder CLI's 13k/5% headroom formula."},
+				{Name: "context_compaction_max_tokens", Type: pluginapi.ConfigFieldTypeInteger, Description: "Maximum output tokens for the one-shot compaction summary (default 8192)."},
+				{Name: "context_compaction_model", Type: pluginapi.ConfigFieldTypeString, Description: "Optional upstream model key used only for context compaction; empty reuses the requested model."},
 				{Name: "checkin_auto", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Compatibility switch for CN daily campaign claims (default true). rewards.actions.checkin takes precedence when rewards is configured."},
 				{Name: "rewards", Type: pluginapi.ConfigFieldTypeObject, Description: "CN-only reward settings: auto (default true), actions (checkin, default true), and account overrides keyed by the account_key returned by /rewards/status."},
 				{Name: "lifecycle_auto", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Auto disable CN when credits exhausted; re-enable CN after check-in restores credits (default true)."},
@@ -565,8 +569,8 @@ func commonHeaders(req *http.Request) {
 
 // applyCosyHeaders computes the full COSY-signed header set for one inference
 // request and applies it to req. Body must be the QoderEncoding-encoded
-// request body (string form), url the gateway endpoint, modelKey the
-// upstream model key (goes into x-model-key). sse toggles cache-control.
+// request body (string form), url the gateway endpoint, and modelKey the
+// upstream model key. sse toggles cache-control.
 //
 // Returns an error if the cosy session cannot be built (e.g. empty token).
 func applyCosyHeaders(req *http.Request, sa *storedAuth, encodedBody, rawURL, modelKey string, sse bool) error {
@@ -582,12 +586,30 @@ func applyCosyHeaders(req *http.Request, sa *storedAuth, encodedBody, rawURL, mo
 		req.Header.Set(k, v)
 	}
 	if modelKey != "" {
-		req.Header.Set("x-model-key", modelKey)
-		source := "system"
-		if m, ok := metadataForModel(sa, modelKey); ok && m.Source != "" {
-			source = m.Source
+		headerModel := modelKey
+		if meta, ok := metadataForModel(sa, modelKey); ok && strings.TrimSpace(meta.DisplayName) != "" {
+			headerModel = strings.TrimSpace(meta.DisplayName)
 		}
-		req.Header.Set("x-model-source", source)
+		req.Header.Set("X-Qoder-Model", headerModel)
+	}
+	if raw, err := qoderDecode([]byte(encodedBody)); err == nil {
+		var identity struct {
+			RequestID  string `json:"request_id"`
+			SessionID  string `json:"session_id"`
+			RequestSet string `json:"request_set_id"`
+		}
+		if json.Unmarshal(raw, &identity) == nil {
+			if identity.RequestID != "" {
+				req.Header.Set("X-Request-Id", identity.RequestID)
+			}
+			if identity.SessionID != "" {
+				req.Header.Set("X-Session-ID", identity.SessionID)
+				req.Header.Set("X-Qoder-Session-Id", identity.SessionID)
+			}
+			if identity.RequestSet != "" {
+				req.Header.Set("X-RequestSet-ID", identity.RequestSet)
+			}
+		}
 	}
 	return nil
 }
@@ -711,15 +733,15 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Build the QoderWork agent_chat_generation body from the OpenAI request,
-	// then QoderEncoding-encode it. The template embeds a 10657-token system
-	// prompt that the server requires for normal behaviour (KNOWLEDGE §5.2).
+	// Build the CLI-compatible agent_chat_generation body, then
+	// QoderEncoding-encode it.
 	qwReq := &openAIRequest{}
 	if err := json.Unmarshal(req.Payload, qwReq); err != nil && len(req.Payload) > 0 {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "payload parse: "+err.Error())
 		return nil, fmt.Errorf("payload parse: %w", err)
 	}
 	qwReq.ClientSessionID = requestClientSession(req.Headers, req.Metadata, qwReq.Metadata)
+	_ = maybeCompactRequest(context.Background(), qwReq, upstreamModel, req.Model, sa)
 	body, err := buildQoderBody(qwReq, upstreamModel, uiUserType(nil), sa)
 	if err != nil {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "body build: "+err.Error())
@@ -800,7 +822,7 @@ func handleExecStream(raw []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	// Build the QoderWork body (template-based) and QoderEncoding-encode.
+	// Build the CLI-compatible body and QoderEncoding-encode it.
 	bodyRaw := req.Payload
 	if len(bodyRaw) == 0 {
 		bodyRaw = req.OriginalRequest
@@ -811,6 +833,7 @@ func handleExecStream(raw []byte) ([]byte, error) {
 		return nil, fmt.Errorf("payload parse: %w", err)
 	}
 	qwReq.ClientSessionID = requestClientSession(req.Headers, req.Metadata, qwReq.Metadata)
+	_ = maybeCompactRequest(context.Background(), qwReq, upstreamModel, req.Model, sa)
 	body, err := buildQoderBody(qwReq, upstreamModel, uiUserType(nil), sa)
 	if err != nil {
 		publishUsage(req.Model, upstreamModel, authUID, started, usage.Detail{}, true, 0, "body build: "+err.Error())

@@ -225,8 +225,13 @@ button .spin{border-color:var(--on-acc);border-top-color:transparent}
     <button type="button" class="sec" onclick="refreshModelRates(this)">刷新模型</button>
     <label><input type="checkbox" id="cnMaxContext" onchange="saveContextSettings()"> 国内版使用最大上下文</label>
     <label><input type="checkbox" id="intlMaxContext" onchange="saveContextSettings()"> 国际版使用最大上下文</label>
+    <label><input type="checkbox" id="contextCompaction" onchange="saveContextSettings()"> CLI 兼容自动上下文压缩</label>
+    <label>压缩触发百分比 <input type="number" id="contextCompactionPct" min="0" max="100" value="0" title="0 使用 CLI 的 13k/5% 余量公式" onchange="saveContextSettings()" style="width:72px"></label>
+    <label>摘要输出上限 <input type="number" id="contextCompactionMaxTokens" min="1" value="8192" onchange="saveContextSettings()" style="width:90px"></label>
+    <label>摘要模型 <input type="text" id="contextCompactionModel" placeholder="留空则使用当前模型" onchange="saveContextSettings()" style="width:180px"></label>
     <label><input type="checkbox" id="queueWait" onchange="saveContextSettings()"> 模型繁忙时等待排队</label>
     <label>最长等待（秒）<input type="number" id="queueWaitSeconds" min="1" value="540" onchange="saveContextSettings()" style="width:90px"></label>
+    <div id="compactionStatus" role="status"></div>
     <div id="queueProgress" role="status"></div>
     <div id="modelSource" role="status"></div>
     <div id="modelCatalog" style="overflow-wrap:anywhere"></div>
@@ -859,6 +864,15 @@ async function loadContextSettings(){
     const d=await api('/models/context');
     document.getElementById('cnMaxContext').checked=!!d.cn_max_context;
     document.getElementById('intlMaxContext').checked=!!d.intl_max_context;
+    const compression=d.context_compaction||{};
+    document.getElementById('contextCompaction').checked=!!compression.enabled;
+    document.getElementById('contextCompactionPct').value=String(compression.percent_override??0);
+    document.getElementById('contextCompactionMaxTokens').value=String(compression.max_tokens??8192);
+    document.getElementById('contextCompactionModel').value=compression.summary_model||'';
+    document.getElementById('compactionStatus').textContent=
+      '压缩：'+(compression.enabled?'开启':'关闭')+' · 成功 '+(compression.successes||0)+
+      ' · 缓存命中 '+(compression.cache_hits||0)+' · 失败 '+(compression.failures||0)+
+      ' · 节省约 '+(compression.tokens_saved||0)+' tokens';
     document.getElementById('queueWait').checked=!!d.queue_wait;
     document.getElementById('queueWaitSeconds').value=String(d.queue_wait_seconds||540);
     const waiting=d.queue_progress||[];
@@ -873,14 +887,35 @@ async function loadContextSettings(){
 async function saveContextSettings(){
   const seconds=Number(document.getElementById('queueWaitSeconds').value);
   if(!Number.isInteger(seconds)||seconds<1){toast('等待时间必须是大于零的整数','err');return}
-  const payload={cn_max_context:document.getElementById('cnMaxContext').checked,intl_max_context:document.getElementById('intlMaxContext').checked,queue_wait:document.getElementById('queueWait').checked,queue_wait_seconds:seconds};
+  const compactionPct=Number(document.getElementById('contextCompactionPct').value);
+  const compactionMax=Number(document.getElementById('contextCompactionMaxTokens').value);
+  if(!Number.isInteger(compactionPct)||compactionPct<0||compactionPct>100){toast('压缩百分比必须是 0–100 的整数','err');return}
+  if(!Number.isInteger(compactionMax)||compactionMax<1){toast('摘要输出上限必须是正整数','err');return}
+  const payload={
+    cn_max_context:document.getElementById('cnMaxContext').checked,
+    intl_max_context:document.getElementById('intlMaxContext').checked,
+    context_compaction:document.getElementById('contextCompaction').checked,
+    context_compaction_pct:compactionPct,
+    context_compaction_max_tokens:compactionMax,
+    context_compaction_model:document.getElementById('contextCompactionModel').value.trim(),
+    queue_wait:document.getElementById('queueWait').checked,
+    queue_wait_seconds:seconds,
+  };
   try{
     const r=await fetch('/v0/management/plugins/qoderwork/config',{method:'PATCH',credentials:'omit',headers:{'Content-Type':'application/json',...(authHeaders(getKey()))},body:JSON.stringify(payload)});
     if(!r.ok)throw new Error('HTTP '+r.status);
     let applied=false;
     for(let i=0;i<20;i++){
       const current=await api('/models/context');
-      if(current.cn_max_context===payload.cn_max_context&&current.intl_max_context===payload.intl_max_context&&current.queue_wait===payload.queue_wait&&current.queue_wait_seconds===payload.queue_wait_seconds){applied=true;break}
+      const currentCompaction=current.context_compaction||{};
+      if(current.cn_max_context===payload.cn_max_context&&
+        current.intl_max_context===payload.intl_max_context&&
+        currentCompaction.enabled===payload.context_compaction&&
+        (currentCompaction.percent_override||0)===payload.context_compaction_pct&&
+        currentCompaction.max_tokens===payload.context_compaction_max_tokens&&
+        (currentCompaction.summary_model||'')===payload.context_compaction_model&&
+        current.queue_wait===payload.queue_wait&&
+        current.queue_wait_seconds===payload.queue_wait_seconds){applied=true;break}
       await new Promise(resolve=>setTimeout(resolve,100));
     }
     if(!applied)throw new Error('设置已写入，但运行时尚未生效');

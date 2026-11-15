@@ -65,11 +65,16 @@ func TestContextOptionsAndCatalogIsolation(t *testing.T) {
 	if len(models) != 1 || models[0].ContextLength != 1000000 {
 		t.Fatalf("max context: %#v", models)
 	}
-	base := map[string]any{"model_config": map[string]any{}}
-	applyModelMetadata(base, cn, "test-model")
-	config := base["model_config"].(map[string]any)["context_config"].(map[string]any)
-	if config["small"].(map[string]any)["is_default"] != true || config["large"].(map[string]any)["is_default"] != false {
-		t.Fatal("provider's context defaults were not preserved on wire")
+	body, err := buildQoderBody(&openAIRequest{Messages: []openAIMessage{{Role: "user", Content: "hello"}}}, "test-model", "", cn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var base map[string]any
+	if json.Unmarshal(body, &base) != nil {
+		t.Fatal("invalid body")
+	}
+	if params := base["parameters"].(map[string]any); params["context_length"] != float64(1_000_000) {
+		t.Fatalf("effective context was not encoded in parameters: %#v", params)
 	}
 	setContextWindows(false, true)
 	models = loadCatalog(cn)
@@ -198,7 +203,7 @@ func TestInternationalPATCatalogAndChat(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`{"assistant":[{"key":"cmodel","display_name":"Cantus","enable":true}]}`))
 		case "/algo/api/v2/service/pro/sse/agent_chat_generation":
-			if r.URL.Host != "api3.qoder.sh" || r.Header.Get("x-model-key") != "cmodel" {
+			if r.URL.Host != "api3.qoder.sh" || r.Header.Get("X-Qoder-Model") != "Cantus" {
 				t.Error("wrong chat routing")
 			}
 			_, _ = w.Write([]byte("data:{\"body\":\"{\\\"choices\\\":[{\\\"delta\\\":{\\\"content\\\":\\\"ok\\\"}}]}\"}\n\ndata:{\"body\":\"[DONE]\"}\n\n"))

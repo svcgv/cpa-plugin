@@ -1,21 +1,13 @@
-// body.go constructs the QoderWork agent_chat_generation request body from
+// body.go constructs the Qoder CLI agent_chat_generation request body from
 // OpenAI-style chat completion inputs.
-//
-// The base template lives in baseprompt.json (embedded). Per-request we
-// overwrite request/session ids, timestamps, model key, and the user prompt.
 package main
 
 import (
 	"bytes"
 	"crypto/sha256"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
-	"regexp"
-	"runtime"
 	"strings"
 	"time"
 
@@ -23,8 +15,7 @@ import (
 	"github.com/google/uuid"
 )
 
-//go:embed baseprompt.json
-var basepromptJSON []byte
+const qoderCLIWireVersion = "1.1.89"
 
 // cpaToUpstreamKey maps CPA-facing model names to upstream keys.
 // Unknown names pass through unchanged (server silently routes to auto).
@@ -69,12 +60,19 @@ type openAIMessage struct {
 	ToolCallID       string          `json:"tool_call_id,omitempty"`
 	Name             string          `json:"name,omitempty"`
 	ReasoningContent string          `json:"reasoning_content,omitempty"`
+	ReasoningSig     string          `json:"reasoning_content_signature,omitempty"`
+	ToolError        bool            `json:"is_error,omitempty"`
 
 	// Images holds image URLs found in this message's content parts. The
 	// upstream agent body accepts them via image_urls /
 	// chat_context.imageUrls, so dropping them makes an image-only request
 	// fail with "no user message in request".
 	Images []string `json:"-"`
+
+	// Expanded carries tool_use/tool_result blocks embedded in a content array.
+	// CPA normally translates those into dedicated messages, but Claude Code
+	// and some Harness bridges can preserve the Anthropic block form.
+	Expanded []openAIMessage `json:"-"`
 }
 
 // UnmarshalJSON accepts a string or an array of content parts. Parts may carry
@@ -89,52 +87,118 @@ func (m *openAIMessage) UnmarshalJSON(raw []byte) error {
 		ToolCallID       string          `json:"tool_call_id"`
 		Name             string          `json:"name"`
 		ReasoningContent string          `json:"reasoning_content"`
+		ReasoningSig     string          `json:"reasoning_content_signature"`
+		ToolError        bool            `json:"is_error"`
 	}
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		return err
 	}
 	m.Role = probe.Role
-	m.Content, m.Images = contentParts(probe.Content)
 	m.ToolCalls, m.ToolCallID, m.Name, m.ReasoningContent = probe.ToolCalls, probe.ToolCallID, probe.Name, probe.ReasoningContent
+	m.ReasoningSig, m.ToolError = probe.ReasoningSig, probe.ToolError
+	m.Content, m.Images, m.Expanded = parseMessageContent(probe.Role, probe.Content)
 	return nil
 }
 
 // contentText flattens an OpenAI content value into plain text.
 func contentParts(raw json.RawMessage) (string, []string) {
+	text, images, _ := parseContentParts(raw)
+	return text, images
+}
+
+// parseContentParts flattens text/image parts and expands Anthropic-style
+// tool_use/tool_result blocks in their original order.
+func parseContentParts(raw json.RawMessage) (string, []string, []openAIMessage) {
 	v := bytes.TrimSpace(raw)
 	if len(v) == 0 || string(v) == "null" {
-		return "", nil
+		return "", nil, nil
 	}
 	if v[0] == '"' {
 		var s string
 		if json.Unmarshal(v, &s) == nil {
-			return s, nil
+			return s, nil, nil
 		}
-		return "", nil
+		return "", nil, nil
 	}
 	if v[0] != '[' {
-		return "", nil
+		return "", nil, nil
 	}
 	var parts []json.RawMessage
 	if json.Unmarshal(v, &parts) != nil {
-		return "", nil
+		return "", nil, nil
 	}
 	var out []string
 	var images []string
+	var expanded []openAIMessage
 	for _, part := range parts {
 		var p struct {
-			Type     string          `json:"type"`
-			Text     string          `json:"text"`
-			Content  json.RawMessage `json:"content"`
-			Input    string          `json:"input_text"`
-			Output   string          `json:"output_text"`
-			ImageURL json.RawMessage `json:"image_url"`
-			FileData json.RawMessage `json:"file_data"`
+			Type      string          `json:"type"`
+			Text      string          `json:"text"`
+			Thinking  string          `json:"thinking"`
+			Content   json.RawMessage `json:"content"`
+			Input     string          `json:"input_text"`
+			Output    string          `json:"output_text"`
+			ImageURL  json.RawMessage `json:"image_url"`
+			FileData  json.RawMessage `json:"file_data"`
+			Source    json.RawMessage `json:"source"`
+			ID        string          `json:"id"`
+			Name      string          `json:"name"`
+			InputJSON json.RawMessage `json:"input"`
+			ToolUseID string          `json:"tool_use_id"`
+			IsError   bool            `json:"is_error"`
+			Signature string          `json:"signature"`
 		}
 		if json.Unmarshal(part, &p) != nil {
 			continue
 		}
+		switch strings.ToLower(strings.TrimSpace(p.Type)) {
+		case "tool_use", "function_call":
+			args := "{}"
+			if len(bytes.TrimSpace(p.InputJSON)) > 0 {
+				rawArgs := bytes.TrimSpace(p.InputJSON)
+				var text string
+				if json.Unmarshal(rawArgs, &text) == nil {
+					args = text
+				} else {
+					args = string(rawArgs)
+				}
+			}
+			calls, _ := json.Marshal([]any{map[string]any{
+				"id": p.ID, "type": "function",
+				"function": map[string]any{"name": p.Name, "arguments": args},
+			}})
+			expanded = append(expanded, openAIMessage{Role: "assistant", ToolCalls: calls})
+			continue
+		case "tool_result", "function_call_output":
+			content, nestedImages, nested := parseContentParts(p.Content)
+			if content == "" && len(p.Content) > 0 && bytes.TrimSpace(p.Content)[0] != '[' {
+				var s string
+				if json.Unmarshal(p.Content, &s) == nil {
+					content = s
+				} else {
+					content = string(bytes.TrimSpace(p.Content))
+				}
+			}
+			expanded = append(expanded, openAIMessage{
+				Role: "tool", Content: content, Images: nestedImages,
+				ToolCallID: firstNonEmpty(p.ToolUseID, p.ID), ToolError: p.IsError,
+				Expanded: nested,
+			})
+			continue
+		case "thinking", "reasoning", "reasoning_text":
+			if p.Thinking != "" || p.Text != "" {
+				expanded = append(expanded, openAIMessage{
+					Role: "assistant", ReasoningContent: firstNonEmpty(p.Thinking, p.Text),
+					ReasoningSig: p.Signature,
+				})
+			}
+			continue
+		}
 		if url := imageURLFromPart(p.Type, p.ImageURL, p.FileData); url != "" {
+			images = append(images, url)
+			continue
+		}
+		if url := imageURLFromAnthropicPart(p.Source); url != "" {
 			images = append(images, url)
 			continue
 		}
@@ -147,13 +211,78 @@ func contentParts(raw json.RawMessage) (string, []string) {
 			out = append(out, p.Output)
 		case len(p.Content) > 0:
 			// Nested {"type":"message","content":[...]} or {"content":"..."}
-			if nested, nestedImages := contentParts(p.Content); nested != "" {
+			nested, nestedImages, nestedExpanded := parseContentParts(p.Content)
+			if nested != "" {
 				out = append(out, nested)
 				images = append(images, nestedImages...)
 			}
+			expanded = append(expanded, nestedExpanded...)
 		}
 	}
-	return strings.Join(out, "\n"), images
+	return strings.Join(out, "\n"), images, expanded
+}
+
+func parseMessageContent(role string, raw json.RawMessage) (string, []string, []openAIMessage) {
+	text, images, expanded := parseContentParts(raw)
+	if len(expanded) == 0 {
+		return text, images, nil
+	}
+
+	// Split mixed text/tool arrays around tool blocks. This preserves the
+	// current user input while emitting a valid call/result sequence.
+	var out []openAIMessage
+	buffer := openAIMessage{Role: role, Content: text, Images: images}
+	for _, item := range expanded {
+		switch item.Role {
+		case "assistant":
+			if strings.EqualFold(role, "assistant") && len(item.ToolCalls) > 0 {
+				buffer.ToolCalls = item.ToolCalls
+				buffer.ReasoningContent = firstNonEmpty(buffer.ReasoningContent, item.ReasoningContent)
+				buffer.ReasoningSig = firstNonEmpty(buffer.ReasoningSig, item.ReasoningSig)
+				out = append(out, buffer)
+				buffer = openAIMessage{Role: role}
+				continue
+			}
+			if buffer.Content != "" || len(buffer.Images) > 0 {
+				out = append(out, buffer)
+			}
+			out = append(out, item)
+			buffer = openAIMessage{Role: role}
+		case "tool":
+			if buffer.Content != "" || len(buffer.Images) > 0 {
+				out = append(out, buffer)
+			}
+			out = append(out, item)
+			buffer = openAIMessage{Role: role}
+		}
+	}
+	if buffer.Content != "" || len(buffer.Images) > 0 {
+		out = append(out, buffer)
+	}
+	return text, images, out
+}
+
+func imageURLFromAnthropicPart(raw json.RawMessage) string {
+	v := bytes.TrimSpace(raw)
+	if len(v) == 0 || v[0] != '{' {
+		return ""
+	}
+	var source struct {
+		Type      string `json:"type"`
+		MediaType string `json:"media_type"`
+		Data      string `json:"data"`
+		URL       string `json:"url"`
+	}
+	if json.Unmarshal(v, &source) != nil {
+		return ""
+	}
+	if source.URL != "" {
+		return strings.TrimSpace(source.URL)
+	}
+	if source.Type == "base64" && source.MediaType != "" && source.Data != "" {
+		return "data:" + source.MediaType + ";base64," + source.Data
+	}
+	return ""
 }
 
 // imageURLFromPart extracts an image URL from a content part. Accepts the
@@ -195,17 +324,27 @@ type openAIRequest struct {
 	Messages            []openAIMessage `json:"messages"`
 	Stream              bool            `json:"stream"`
 	Tools               json.RawMessage `json:"tools"`
+	Functions           json.RawMessage `json:"functions"`
 	ToolChoice          json.RawMessage `json:"tool_choice"`
 	MaxTokens           *int            `json:"max_tokens"`
 	MaxCompletionTokens *int            `json:"max_completion_tokens"`
 	MaxOutputTokens     *int            `json:"max_output_tokens"`
 	ReasoningEffort     string          `json:"reasoning_effort"`
+	PreserveThinking    *bool           `json:"preserve_thinking"`
+	Temperature         *float64        `json:"temperature"`
+	TopP                *float64        `json:"top_p"`
+	TopK                *int            `json:"top_k"`
+	Stop                json.RawMessage `json:"stop"`
+	CustomContext       json.RawMessage `json:"custom_context"`
 	ClientSessionID     string          `json:"-"`
+	TaskID              string          `json:"-"`
+	NoContextCompaction bool            `json:"-"`
 
 	// Input carries the Responses API form when the caller (or CPA) forwards
 	// it directly: "input" may be a string or an array of typed items.
 	Input        json.RawMessage `json:"input"`
 	Instructions string          `json:"instructions"`
+	System       json.RawMessage `json:"system"`
 
 	// Clients sometimes disclose their real working directory. Codex puts it
 	// in session metadata; some OpenAI-compatible clients send it at the top
@@ -219,8 +358,16 @@ type openAIRequest struct {
 // effectiveMessages returns the conversation, accepting either the Chat
 // Completions "messages" field or the Responses API "input" field.
 func (r *openAIRequest) effectiveMessages() []openAIMessage {
-	if len(r.Messages) > 0 {
-		return r.Messages
+	var out []openAIMessage
+	for _, m := range r.Messages {
+		if len(m.Expanded) > 0 {
+			out = append(out, m.Expanded...)
+			continue
+		}
+		out = append(out, m)
+	}
+	if len(out) > 0 {
+		return out
 	}
 	return parseResponsesInput(r.Input)
 }
@@ -247,16 +394,21 @@ func parseResponsesInput(raw json.RawMessage) []openAIMessage {
 	if json.Unmarshal(v, &items) != nil {
 		return nil
 	}
-	// Responses API represents function calls and outputs as top-level items.
+	// Responses API represents calls, reasoning and outputs as top-level items.
 	var msgs []openAIMessage
 	asMessages := true
 	for _, item := range items {
 		var typed struct {
-			Type      string          `json:"type"`
-			CallID    string          `json:"call_id"`
-			Name      string          `json:"name"`
-			Arguments string          `json:"arguments"`
-			Output    json.RawMessage `json:"output"`
+			Type             string          `json:"type"`
+			Role             string          `json:"role"`
+			Content          json.RawMessage `json:"content"`
+			Summary          json.RawMessage `json:"summary"`
+			EncryptedContent string          `json:"encrypted_content"`
+			CallID           string          `json:"call_id"`
+			Name             string          `json:"name"`
+			Arguments        string          `json:"arguments"`
+			Input            json.RawMessage `json:"input"`
+			Output           json.RawMessage `json:"output"`
 		}
 		_ = json.Unmarshal(item, &typed)
 		switch typed.Type {
@@ -267,6 +419,52 @@ func parseResponsesInput(raw json.RawMessage) []openAIMessage {
 		case "function_call_output":
 			content, images := contentParts(typed.Output)
 			msgs = append(msgs, openAIMessage{Role: "tool", ToolCallID: typed.CallID, Content: content, Images: images})
+			continue
+		case "custom_tool_call":
+			args := "{}"
+			if raw := bytes.TrimSpace(typed.Input); len(raw) > 0 {
+				if raw[0] == '"' {
+					_ = json.Unmarshal(raw, &args)
+				} else {
+					args = string(raw)
+				}
+			}
+			calls, _ := json.Marshal([]any{map[string]any{"id": typed.CallID, "type": "function", "function": map[string]any{"name": typed.Name, "arguments": args}}})
+			msgs = append(msgs, openAIMessage{Role: "assistant", ToolCalls: calls})
+			continue
+		case "custom_tool_call_output":
+			content, images := contentParts(typed.Output)
+			msgs = append(msgs, openAIMessage{Role: "tool", ToolCallID: typed.CallID, Content: content, Images: images})
+			continue
+		case "reasoning":
+			text, images, expanded := parseContentParts(typed.Content)
+			summary, summaryImages, summaryExpanded := parseContentParts(typed.Summary)
+			msg := openAIMessage{
+				Role: "assistant", Content: text,
+				ReasoningContent: firstNonEmpty(summary, text),
+				ReasoningSig:     typed.EncryptedContent,
+				Images:           append(images, summaryImages...),
+			}
+			if msg.Content != "" || msg.ReasoningContent != "" || len(msg.Images) > 0 {
+				msgs = append(msgs, msg)
+			}
+			msgs = append(msgs, append(expanded, summaryExpanded...)...)
+			continue
+		case "message":
+			var m openAIMessage
+			if json.Unmarshal(item, &m) == nil && m.Role != "" {
+				msgs = append(msgs, m)
+				continue
+			}
+		case "input_text", "output_text", "text":
+			if typed.Content != nil {
+				text, images, expanded := parseContentParts(typed.Content)
+				msgs = append(msgs, openAIMessage{Role: firstNonEmpty(typed.Role, "user"), Content: text, Images: images, Expanded: expanded})
+			} else if typed.Output != nil {
+				msg := openAIMessage{Role: firstNonEmpty(typed.Role, "user")}
+				msg.Content, msg.Images, msg.Expanded = parseMessageContent(msg.Role, typed.Output)
+				msgs = append(msgs, msg)
+			}
 			continue
 		}
 		var m openAIMessage
@@ -316,54 +514,21 @@ func extractLatestUserPrompt(messages []openAIMessage) string {
 	return ""
 }
 
-// templateEnvRE matches the <env> block baked into baseprompt.json. That block
-// was captured from someone else's machine (D:/Projects/Qoder on Windows with
-// an empty date), so it must never reach an upstream request verbatim.
-var templateEnvRE = regexp.MustCompile(`(?s)<env>.*?</env>`)
-
-// applyEnvironment rewrites the template's <env> block.
-//
-// The plugin runs inside the CPA host process and CPA does not forward the
-// client's working directory in ExecutorRequest, so os.Getwd() would report the
-// *host* directory (e.g. /CLIProxyAPI inside the container) and the model would
-// confidently claim to be working in someone else's project. Instead of
-// inventing a path, state that it is unknown and let the conversation supply
-// real paths.
-func applyEnvironment(systemPrompt, clientCWD string) string {
-	wd := strings.TrimSpace(clientCWD)
-	isRepo := "unknown"
-	if wd == "" {
-		wd = "unknown (not provided by the client; use paths from the conversation)"
-	} else {
-		isRepo = "No"
-		// The path is on the client's machine, so .git may not be reachable
-		// from this process; only assert "Yes" when it is.
-		if _, err := os.Stat(filepath.Join(wd, ".git")); err == nil {
-			isRepo = "Yes"
+func requestMessages(req *openAIRequest) []openAIMessage {
+	if req == nil {
+		return nil
+	}
+	messages := append([]openAIMessage(nil), req.effectiveMessages()...)
+	if len(bytes.TrimSpace(req.System)) > 0 {
+		text, images, expanded := parseContentParts(req.System)
+		if text != "" || len(images) > 0 {
+			messages = append([]openAIMessage{{Role: "system", Content: text, Images: images, Expanded: expanded}}, messages...)
 		}
 	}
-	block := fmt.Sprintf("<env>\nWorking directory: %s\nIs directory a git repo: %s\nPlatform: %s\nOS Version: %s\nToday's date: %s\n</env>",
-		wd,
-		isRepo,
-		runtime.GOOS,
-		buildMachineOS(),
-		time.Now().Format("2006-01-02"),
-	)
-	if templateEnvRE.MatchString(systemPrompt) {
-		return templateEnvRE.ReplaceAllLiteralString(systemPrompt, block)
+	if req.Instructions != "" {
+		messages = append([]openAIMessage{{Role: "system", Content: req.Instructions}}, messages...)
 	}
-	return systemPrompt
-}
-
-// clientSystemText concatenates the client's own system messages.
-func clientSystemText(messages []openAIMessage) string {
-	var parts []string
-	for _, m := range messages {
-		if m.Role == "system" && strings.TrimSpace(m.Content) != "" {
-			parts = append(parts, m.Content)
-		}
-	}
-	return strings.Join(parts, "\n\n")
+	return messages
 }
 
 // latestUserImages returns the images attached to the last user message, so an
@@ -408,18 +573,13 @@ func messageContent(m openAIMessage) any {
 	return parts
 }
 
-// buildQoderBody renders the upstream agent_chat_generation body for one request.
-// modelKey is the upstream key (already mapped via cpaToUpstreamKey).
+// buildQoderBody renders the current Qoder CLI agent_chat_generation body.
+// The field set and defaults mirror CLI 1.1.89's remote-chat builder rather
+// than the older captured template.
 func buildQoderBody(req *openAIRequest, modelKey, userType string, sa *storedAuth) ([]byte, error) {
-	var base map[string]any
-	if err := json.Unmarshal(basepromptJSON, &base); err != nil {
-		return nil, fmt.Errorf("baseprompt decode: %w", err)
-	}
+	messages := requestMessages(req)
 
-	messages := append([]openAIMessage(nil), req.effectiveMessages()...)
-	if req.Instructions != "" {
-		messages = append([]openAIMessage{{Role: "system", Content: req.Instructions}}, messages...)
-	}
+	meta, hasMeta := metadataForModel(sa, modelKey)
 	reasoningEffort, reasoningEnabled, err := resolveReasoning(sa, modelKey, req.ReasoningEffort)
 	if err != nil {
 		return nil, err
@@ -429,7 +589,7 @@ func buildQoderBody(req *openAIRequest, modelKey, userType string, sa *storedAut
 			if len(messages[i].Images) == 0 {
 				continue
 			}
-			if meta, ok := metadataForModel(sa, modelKey); !ok || !meta.vision() {
+			if !hasMeta || !meta.vision() {
 				return nil, fmt.Errorf("模型 %s 未声明支持图片输入", modelKey)
 			}
 			messages[i].Images = append([]string(nil), messages[i].Images...)
@@ -444,92 +604,97 @@ func buildQoderBody(req *openAIRequest, modelKey, userType string, sa *storedAut
 		return nil, fmt.Errorf("no user message in request")
 	}
 
-	nid := uuid.NewString()
-	requestSetID := uuid.NewString()
-	base["request_id"] = nid
-	base["chat_record_id"] = nid
-	base["request_set_id"] = requestSetID
-	base["session_id"] = referenceSessionID(sa, modelKey, req.ClientSessionID)
-	base["stream"] = true
-	base["aliyun_user_type"] = ""
-	base["system"] = ""
-	base["session_type"] = "qoderclicn"
-	if sa != nil && sa.region() == regionIntl {
-		base["session_type"] = "qodercli"
-	}
-	base["agent_id"] = "agent_common"
-
-	// model_config
-	base["model_config"] = map[string]any{"key": modelKey, "is_reasoning": false, "source": "system"}
-	applyModelMetadata(base, sa, modelKey)
-	if mc, ok := base["model_config"].(map[string]any); ok && reasoningEnabled != nil {
-		mc["is_reasoning"] = *reasoningEnabled
-	}
-	maxTokens := req.MaxTokens
-	if req.MaxCompletionTokens != nil {
-		maxTokens = req.MaxCompletionTokens
-	}
-	if req.MaxOutputTokens != nil {
-		maxTokens = req.MaxOutputTokens
-	}
-	if meta, ok := metadataForModel(sa, modelKey); ok {
-		if declared := meta.maxCompletion(); declared > 0 && (maxTokens == nil || int64(*maxTokens) > declared) {
-			limit := int(declared)
-			maxTokens = &limit
+	modelReasoning := false
+	if hasMeta {
+		modelReasoning = rawBool(meta.IsReasoning, false)
+		if enabled, ok := meta.ThinkingConfig["enabled"]; ok && enabled.IsDefault {
+			modelReasoning = true
+		}
+		if disabled, ok := meta.ThinkingConfig["disabled"]; ok && disabled.IsDefault {
+			modelReasoning = false
 		}
 	}
-	parameters := map[string]any{}
-	if maxTokens != nil && *maxTokens > 0 {
-		parameters["max_tokens"] = *maxTokens
-		if mc, ok := base["model_config"].(map[string]any); ok {
-			mc["max_output_tokens"] = *maxTokens
+	if reasoningEnabled != nil {
+		modelReasoning = *reasoningEnabled
+	}
+
+	contextWindow := effectiveContextWindow(sa, modelKey)
+	maxTokens := requestedMaxOutputTokens(req, meta)
+	displayName := modelKey
+	format := "openai"
+	source := "system"
+	if hasMeta {
+		displayName = firstNonEmpty(strings.TrimSpace(meta.DisplayName), displayName)
+		format = firstNonEmpty(strings.TrimSpace(meta.Format), format)
+		source = firstNonEmpty(strings.TrimSpace(meta.Source), source)
+	}
+
+	parameters := map[string]any{"max_tokens": maxTokens}
+	if req.Temperature != nil {
+		parameters["temperature"] = *req.Temperature
+	}
+	if req.TopP != nil {
+		parameters["top_p"] = *req.TopP
+	}
+	if req.TopK != nil {
+		parameters["top_k"] = *req.TopK
+	}
+	if len(bytes.TrimSpace(req.Stop)) > 0 {
+		var stop any
+		if json.Unmarshal(req.Stop, &stop) == nil {
+			parameters["stop"] = stop
 		}
 	}
 	if reasoningEffort != "" {
 		parameters["reasoning_effort"] = reasoningEffort
+	} else if reasoningEnabled != nil && !*reasoningEnabled {
+		parameters["reasoning_effort"] = "none"
 	}
-	base["parameters"] = parameters
-	base["tools"] = []any{}
-	if len(req.Tools) > 0 {
-		var tools any
-		if json.Unmarshal(req.Tools, &tools) == nil {
-			base["tools"] = tools
-		}
+	if reasoningEffort != "" || reasoningEnabled != nil {
+		parameters["enable_thinking"] = modelReasoning
 	}
-	if len(req.ToolChoice) > 0 {
-		var choice any
-		if json.Unmarshal(req.ToolChoice, &choice) == nil {
-			base["tool_choice"] = choice
-		}
+	if req.PreserveThinking != nil {
+		parameters["preserve_thinking"] = *req.PreserveThinking
+	}
+	if contextWindow > 0 {
+		parameters["context_length"] = contextWindow
+	}
+	if choice := normalizeQoderToolChoice(req.ToolChoice); choice != nil {
+		parameters["tool_choice"] = choice
 	}
 
-	modelConfig := base["model_config"].(map[string]any)
-	base["chat_context"] = map[string]any{"chatPrompt": "", "imageUrls": nil, "extra": map[string]any{"context": []any{}, "modelConfig": map[string]any{"key": modelKey, "is_reasoning": modelConfig["is_reasoning"]}, "originalContent": prompt}, "features": []any{}, "text": prompt}
-
-	// Images travel inline in messages, as OpenAI-style content parts. That is
-	// exactly what the Qoder CLI runtime does (its message builder emits
-	// {type:"image_url", image_url:{url:"data:<mime>;base64,..."}}), and a live
-	// gateway probe confirms the model sees them there. chat_context.imageUrls
-	// stays null: filling it (with either a client URL or a re-uploaded one)
-	// never delivered the image to the model.
+	modelConfig := map[string]any{
+		"key":              modelKey,
+		"display_name":     displayName,
+		"model":            "",
+		"is_vl":            hasMeta && meta.vision(),
+		"is_reasoning":     modelReasoning,
+		"max_input_tokens": contextWindow,
+		"source":           source,
+		"format":           format,
+		"api_key":          "",
+		"url":              "",
+	}
 
 	var out []any
-	client := clientSystemText(messages)
-	if client != "" {
-		out = append(out, map[string]any{"role": "system", "content": client})
-	}
 	for _, m := range messages {
-		if m.Role == "system" {
-			continue // already emitted first
-		}
-		role := m.Role
+		role := strings.ToLower(strings.TrimSpace(m.Role))
 		if role == "developer" {
 			role = "system"
 		}
-		item := map[string]any{"role": role, "content": messageContent(m)}
+		switch role {
+		case "system", "user", "assistant", "tool", "function":
+		default:
+			role = "system"
+		}
+		content := messageContent(m)
+		item := map[string]any{"role": role, "content": content}
+		if _, ok := content.([]any); ok {
+			// CLI 1.1.89 emits both fields when a message has image parts.
+			item["contents"] = content
+		}
 		if len(m.ToolCalls) > 0 {
-			var calls any
-			if json.Unmarshal(m.ToolCalls, &calls) == nil {
+			if calls := normalizeQoderToolCalls(m.ToolCalls); len(calls) > 0 {
 				item["tool_calls"] = calls
 			}
 		}
@@ -537,29 +702,220 @@ func buildQoderBody(req *openAIRequest, modelKey, userType string, sa *storedAut
 			item["tool_call_id"] = m.ToolCallID
 		}
 		if m.Name != "" {
-			item["name"] = m.Name
+			item["name"] = sanitizeQoderText(m.Name)
 		}
 		if m.ReasoningContent != "" {
-			item["reasoning_content"] = m.ReasoningContent
+			item["reasoning_content"] = sanitizeQoderText(m.ReasoningContent)
+		}
+		if m.ReasoningSig != "" {
+			item["reasoning_content_signature"] = m.ReasoningSig
+		}
+		if m.ToolError {
+			item["is_error"] = true
 		}
 		out = append(out, item)
 	}
 	sanitizeQoderMessages(out)
-	base["messages"] = out
 
-	// business
-	if biz, ok := base["business"].(map[string]any); ok {
-		biz["version"] = "1.0.0"
-		biz["id"] = requestSetID
-		biz["begin_at"] = time.Now().UnixMilli()
-		if runes := []rune(prompt); len(runes) > 30 {
-			biz["name"] = string(runes[:30])
-		} else {
-			biz["name"] = prompt
-		}
+	nid := uuid.NewString()
+	requestSetID := uuid.NewString()
+	taskID := firstNonEmpty(strings.TrimSpace(req.TaskID), "common")
+	businessName := prompt
+	if runes := []rune(businessName); len(runes) > 30 {
+		businessName = string(runes[:30])
+	}
+	sessionType := "qoderclicn"
+	if sa != nil && sa.region() == regionIntl {
+		sessionType = "qodercli"
 	}
 
-	return json.Marshal(base)
+	body := map[string]any{
+		"request_id":       nid,
+		"chat_record_id":   nid,
+		"request_set_id":   requestSetID,
+		"session_id":       referenceSessionID(sa, modelKey, req.ClientSessionID),
+		"stream":           true,
+		"chat_task":        "FREE_INPUT",
+		"is_reply":         true,
+		"is_retry":         false,
+		"source":           1,
+		"version":          "3",
+		"agent_id":         "agent_common",
+		"aliyun_user_type": "",
+		"session_type":     sessionType,
+		"task_id":          taskID,
+		"system":           nil,
+		"chat_context": map[string]any{
+			"text":     prompt,
+			"features": []any{},
+			"extra": map[string]any{
+				"context":         []any{},
+				"modelConfig":     map[string]any{"key": modelKey, "is_reasoning": modelReasoning},
+				"originalContent": prompt,
+			},
+			"chatPrompt": "",
+			"imageUrls":  nil,
+		},
+		"messages":     out,
+		"tools":        normalizeQoderTools(req.Tools, req.Functions),
+		"parameters":   parameters,
+		"model_config": modelConfig,
+		"business": map[string]any{
+			"product":  "cli",
+			"version":  qoderCLIWireVersion,
+			"type":     "agent",
+			"id":       requestSetID,
+			"name":     businessName,
+			"begin_at": time.Now().UnixMilli(),
+			"stage":    "start",
+		},
+	}
+	if len(bytes.TrimSpace(req.CustomContext)) > 0 {
+		var custom any
+		if json.Unmarshal(req.CustomContext, &custom) == nil {
+			body["custom_context"] = custom
+		}
+	}
+	// Keep the argument in the signature for all existing callers; the CLI
+	// derives user type from signed identity rather than sending it.
+	_ = userType
+	return json.Marshal(body)
+}
+
+func effectiveContextWindow(sa *storedAuth, modelKey string) int64 {
+	meta, ok := metadataForModel(sa, modelKey)
+	if !ok {
+		return 0
+	}
+	if sa != nil && useMaxContext(sa.region()) {
+		return meta.maxContextLength()
+	}
+	return meta.contextLength()
+}
+
+func requestedMaxOutputTokens(req *openAIRequest, meta modelCatalogEntry) int {
+	const defaultMaxOutput = 32000
+	value := 0
+	for _, candidate := range []*int{req.MaxTokens, req.MaxCompletionTokens, req.MaxOutputTokens} {
+		if candidate != nil && *candidate > 0 {
+			value = *candidate
+		}
+	}
+	if declared := int(meta.maxCompletion()); declared > 0 && (value == 0 || value > declared) {
+		value = declared
+	}
+	if value <= 0 {
+		value = defaultMaxOutput
+	}
+	return value
+}
+
+func normalizeQoderTools(primary, legacy json.RawMessage) []any {
+	raw := primary
+	if len(bytes.TrimSpace(raw)) == 0 {
+		raw = legacy
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return []any{}
+	}
+	var source []map[string]any
+	if json.Unmarshal(raw, &source) != nil {
+		return []any{}
+	}
+	out := make([]any, 0, len(source))
+	for _, tool := range source {
+		name, description := "", ""
+		var parameters any = map[string]any{"type": "object", "properties": map[string]any{}}
+		if fn, ok := tool["function"].(map[string]any); ok {
+			name, _ = fn["name"].(string)
+			description, _ = fn["description"].(string)
+			if v, ok := fn["parameters"]; ok {
+				parameters = v
+			}
+		} else {
+			name, _ = tool["name"].(string)
+			description, _ = tool["description"].(string)
+			if v, ok := tool["parameters"]; ok {
+				parameters = v
+			} else if v, ok := tool["input_schema"]; ok {
+				parameters = v
+			}
+		}
+		name, description = strings.TrimSpace(name), strings.TrimSpace(description)
+		if name == "" {
+			continue
+		}
+		out = append(out, map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        name,
+				"description": sanitizeQoderText(description),
+				"parameters":  parameters,
+			},
+		})
+	}
+	return out
+}
+
+func normalizeQoderToolChoice(raw json.RawMessage) any {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil
+	}
+	var value any
+	if json.Unmarshal(raw, &value) != nil {
+		return nil
+	}
+	switch v := value.(type) {
+	case string:
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return nil
+		}
+		return v
+	case map[string]any:
+		typ, _ := v["type"].(string)
+		switch strings.ToLower(strings.TrimSpace(typ)) {
+		case "auto", "required", "none":
+			return strings.ToLower(strings.TrimSpace(typ))
+		case "function":
+			if fn, ok := v["function"].(map[string]any); ok {
+				if name, _ := fn["name"].(string); strings.TrimSpace(name) != "" {
+					return strings.TrimSpace(name)
+				}
+			}
+			if name, _ := v["name"].(string); strings.TrimSpace(name) != "" {
+				return strings.TrimSpace(name)
+			}
+		}
+	}
+	return nil
+}
+
+func normalizeQoderToolCalls(raw json.RawMessage) []any {
+	var calls []map[string]any
+	if json.Unmarshal(raw, &calls) != nil {
+		return nil
+	}
+	out := make([]any, 0, len(calls))
+	for _, call := range calls {
+		id, _ := call["id"].(string)
+		fn, _ := call["function"].(map[string]any)
+		name, _ := fn["name"].(string)
+		arguments, _ := fn["arguments"].(string)
+		if arguments == "" {
+			if nested, ok := fn["arguments"].(map[string]any); ok {
+				b, _ := json.Marshal(nested)
+				arguments = string(b)
+			} else {
+				arguments = "{}"
+			}
+		}
+		out = append(out, map[string]any{
+			"id": id, "type": "function",
+			"function": map[string]any{"name": name, "arguments": arguments},
+		})
+	}
+	return out
 }
 
 func sanitizeQoderText(s string) string {

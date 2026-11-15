@@ -18,6 +18,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"net/url"
+	"os"
 	"runtime"
 	"sort"
 	"strings"
@@ -42,12 +43,12 @@ XcW+ML9FoCI6AOvOzwIDAQAB
 // serves a stale catalog when the client identity is missing or pinned to an
 // old version.
 const (
-	cosyClientVersion   = "1.1.69"
+	cosyClientVersion   = qoderCLIWireVersion
 	cosyClientType      = "5"
 	cosyScene           = "assistant"
 	cosyBusinessProduct = "cli"
 	cosyBusinessType    = "agent"
-	cosyUserAgent       = "qodercli/1.1.69"
+	cosyUserAgent       = "qoder/" + qoderCLIWireVersion
 )
 
 var serverPubKey *rsa.PublicKey
@@ -286,7 +287,34 @@ func (s *cosySession) headers(uid, body, rawURL, accept string, sse bool) (map[s
 	if sse {
 		h["cache-control"] = "no-cache"
 	}
+	if hostname := sanitizeQoderHostname(); hostname != "" {
+		h["cosy-machinehostname"] = hostname
+	}
 	return h, nil
+}
+
+func sanitizeQoderHostname() string {
+	host, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range host {
+		if r >= 0x21 && r <= 0x7e {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	value := strings.Trim(b.String(), "-")
+	if len(value) > 96 {
+		value = value[:96]
+	}
+	return value
 }
 
 // modelListHeaders is the header set for GET /algo/api/v2/model/list. The
