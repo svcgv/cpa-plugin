@@ -417,6 +417,8 @@ var sanitizeFeatures = []string{
 	"x-anthropic-billing-header",
 	"You are Claude Code",
 	"Main branch (",
+	"You are a coding agent running in the Codex CLI",
+	"github.com/anthropics/",
 }
 
 var sanitizeBillingHeaderRE = regexp.MustCompile(`(?i)x-anthropic-billing-header:[^;\n]*;?\s*`)
@@ -434,6 +436,12 @@ func sanitizeBlockedTemplates(s string) string {
 	s = strings.ReplaceAll(s,
 		"Main branch (you will usually use this for PRs)",
 		"Default branch (you will usually use this for PRs)")
+	s = strings.ReplaceAll(s,
+		"You are a coding agent running in the Codex CLI, a terminal-based coding assistant.",
+		"You are a coding agent running in the Codex CLI tool, a terminal-based coding assistant.")
+	s = strings.ReplaceAll(s,
+		"To give feedback, users should report the issue at https://github.com/anthropics/claude-code/issues",
+		"To provide feedback, users should report the issue at https://github.com/anthropics/claude-code/issues")
 	s = sanitizeBillingHeaderRE.ReplaceAllString(s, "")
 	s = sanitizeCCKeyValueRE.ReplaceAllString(s, "")
 	if s == original {
