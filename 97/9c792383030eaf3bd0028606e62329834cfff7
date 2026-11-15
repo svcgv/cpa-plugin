@@ -1,0 +1,25 @@
+.gitignore
+  s_3feb248fe2c024::t_c6eb09d69c775d 24-29
+  s_3feb248fe2c024::t_170a7faa0f5411 30-32
+tools/build-linux.sh
+  s_3feb248fe2c024::t_c1452752eb2deb 41,48
+  s_3feb248fe2c024::t_abc0b6587daadf 55-57
+  s_3feb248fe2c024::t_24838bd4efe9a5 63
+  s_3feb248fe2c024::t_5d002c434240fc 1-40,42-47,49-54,58-62,64-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "979c792383030eaf3bd0028606e62329834cfff7",
+  "prompts": {},
+  "sessions": {
+    "s_3feb248fe2c024": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dd83-1690-7303-a5d7-59d9ce2cc906",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "svcgv <hb1230123@hotmail.com>"
+    }
+  }
+}
